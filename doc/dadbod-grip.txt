@@ -1,0 +1,440 @@
+*dadbod-grip.txt*  DataGrip-style editable data grids for Neovim
+
+Author:   Jory Pestorious
+License:  MIT
+Requires: Neovim 0.10+, vim-dadbod
+
+==============================================================================
+CONTENTS                                                    *grip-contents*
+
+  1. Introduction .............. |grip-introduction|
+  2. Requirements .............. |grip-requirements|
+  3. Installation .............. |grip-install|
+  4. Configuration ............. |grip-config|
+  5. Commands .................. |grip-commands|
+  6. Keybindings ............... |grip-keybindings|
+  7. Editing ................... |grip-editing|
+  8. Sort, Filter, Paginate .... |grip-sort-filter|
+  9. Foreign Key Navigation .... |grip-fk-nav|
+  10. Schema Browser ........... |grip-schema|
+  11. Query Pad ................ |grip-query-pad|
+  12. Saved Queries ............ |grip-saved-queries|
+  13. Connections .............. |grip-connections|
+  14. Export ................... |grip-export|
+  15. Adapters ................. |grip-adapters|
+  16. Public API ............... |grip-api|
+
+==============================================================================
+1. INTRODUCTION                                          *grip-introduction*
+
+dadbod-grip.nvim turns Neovim into a DataGrip-style database client powered
+by vim-dadbod. It renders query results as editable grids with inline cell
+editing, visual change staging, sort/filter/pagination, foreign key
+navigation, schema browsing, and a SQL query pad.
+
+Works standalone (no vim-dadbod-ui needed) or alongside it.
+
+Quick start: >
+  :GripConnect                  pick or add a database connection
+  :GripSchema                   browse tables with columns and types
+  :Grip users                   open a table in an editable grid
+  :GripQuery                    open a SQL scratch pad
+<
+
+==============================================================================
+2. REQUIREMENTS                                          *grip-requirements*
+
+- Neovim 0.10 or later
+- vim-dadbod (https://github.com/tpope/vim-dadbod)
+- One or more database CLI tools in PATH:
+
+  PostgreSQL ......... psql
+  SQLite ............. sqlite3
+  MySQL/MariaDB ...... mysql (8.0.3+ for --csv, or MariaDB 10.5+)
+  DuckDB ............. duckdb
+
+==============================================================================
+3. INSTALLATION                                              *grip-install*
+
+lazy.nvim (recommended): >lua
+  {
+    "joryeugene/dadbod-grip.nvim",
+    dependencies = { "tpope/vim-dadbod" },
+    cmd = { "Grip", "GripSchema", "GripTables", "GripQuery", "GripConnect" },
+    keys = {
+      { "<leader>lg", function() require("dadbod-grip").open_smart() end,
+        desc = "Grip: Open grid" },
+      { "<leader>gs", "<cmd>GripSchema<cr>", desc = "Grip: Schema browser" },
+      { "<leader>gt", "<cmd>GripTables<cr>", desc = "Grip: Table picker" },
+      { "<leader>gq", "<cmd>GripQuery<cr>", desc = "Grip: Query pad" },
+      { "<leader>gc", "<cmd>GripConnect<cr>", desc = "Grip: Connect" },
+    },
+    opts = {},
+  }
+<
+Recommended extras: >lua
+  -- SQL completion in query pad (auto-completes table/column names)
+  { "kristijanhusak/vim-dadbod-completion", ft = { "sql" } }
+
+  -- Better picker UX (optional, grip falls back to vim.ui.select)
+  { "nvim-telescope/telescope.nvim" }  -- or { "ibhagwan/fzf-lua" }
+<
+packer.nvim: >lua
+  use {
+    "joryeugene/dadbod-grip.nvim",
+    requires = { "tpope/vim-dadbod" },
+  }
+<
+
+==============================================================================
+4. CONFIGURATION                                              *grip-config*
+
+setup() is called automatically by the plugin loader with sensible defaults.
+Override if needed: >lua
+  require("dadbod-grip").setup({
+    limit         = 100,    -- default row limit for SELECT queries
+    max_col_width = 40,     -- max display width per column
+    timeout       = 10000,  -- query timeout in milliseconds
+  })
+<
+No default keymaps are set outside the grip buffer.
+
+==============================================================================
+5. COMMANDS                                                 *grip-commands*
+
+All commands are global and available after the plugin loads.
+
+                                                                     *:Grip*
+:Grip [table|SQL|file]
+  Open a table in an editable grid, run a SQL query, or open a file as a
+  table via DuckDB.
+
+  Examples: >
+    :Grip users
+    :Grip SELECT * FROM orders LIMIT 50
+    :Grip /path/to/data.parquet
+<
+
+                                                               *:GripSchema*
+:GripSchema
+  Toggle the schema browser sidebar. Shows tables and views with expandable
+  columns, type abbreviations, and PK/FK markers.
+
+                                                               *:GripTables*
+:GripTables
+  Open the table picker. Uses telescope.nvim if available, then fzf-lua,
+  then falls back to vim.ui.select. Shows column preview in the picker.
+
+                                                                *:GripQuery*
+:GripQuery [sql]
+  Open a SQL query pad. Optionally pre-fill with a SQL string. Press
+  <C-CR> to execute the buffer contents into a grip grid.
+
+                                                                 *:GripSave*
+:GripSave [name]
+  Save the current query pad content to .grip/queries/{name}.sql.
+  Prompts for a name if not provided.
+
+                                                                 *:GripLoad*
+:GripLoad [name]
+  Load a saved query into the query pad. Shows a picker if no name is
+  provided.
+
+                                                              *:GripConnect*
+:GripConnect [url]
+  Switch database connection. Shows a picker if no argument is provided.
+  Reads from .grip/connections.json, g:dbs (DBUI compatible), and
+  $DATABASE_URL.
+
+                                                              *:GripExplain*
+:GripExplain [sql]
+  Render EXPLAIN plan for the current query or a given SQL string.
+  Color-codes cost levels: green (low), yellow (medium), red (high).
+
+==============================================================================
+6. KEYBINDINGS                                           *grip-keybindings*
+
+All keybindings are buffer-local to the grip grid. Press ? for in-buffer
+help.
+
+NAVIGATION ~
+                                                          *grip-navigation*
+  j / k           Move between rows
+  h / l           Move cursor within row
+  w / b           Next / previous column
+  Tab / S-Tab     Next / previous column
+  gg              First data row
+  G               Last data row
+  0 / ^           First column (0 unpins if columns are pinned)
+  $               Last column
+  { / }           Previous / next modified row
+  <CR>            Expand cell value in popup
+  K               Row view (vertical transpose of current row)
+
+EDITING ~
+                                                            *grip-editing*
+  e               Edit cell under cursor (opens float editor)
+  n               Set cell to NULL
+  p               Paste clipboard value into cell
+  o               Insert new blank row after cursor
+  d               Toggle delete on current row
+  u               Undo last edit (multi-level, pops undo stack)
+  U               Undo all changes (resets to original state)
+  a               Apply all staged changes to database
+
+BATCH EDITING (visual mode) ~
+                                                      *grip-batch-editing*
+  e               Set all selected cells in column to same value
+  d               Toggle delete on all selected rows
+  n               Set all selected cells in column to NULL
+
+SORT / FILTER / PAGINATION ~
+                                                       *grip-sort-filter*
+  s               Toggle sort on column (ASC then DESC then off)
+  S               Stack secondary sort on column
+  f               Quick filter by cell value (column = value)
+  <C-f>           Freeform WHERE clause filter
+  F               Clear all filters
+  X               Reset view (clear sort, filter, and page)
+  ]p / [p         Next / previous page
+  ]P / [P         Last / first page
+
+FK NAVIGATION ~
+                                                            *grip-fk-nav*
+  gf              Follow foreign key under cursor to referenced row
+  <C-o>           Go back in FK navigation stack
+
+ANALYSIS AND EXPORT ~
+                                                           *grip-analysis*
+  ga              Aggregate selected cells (visual mode)
+                  Shows count, sum, avg, min, max
+  gS              Column statistics popup
+                  Shows count, distinct, nulls, min/max, top values
+  gx              Explain current query plan
+  gE              Export table in 5 formats (see |grip-export|)
+
+INSPECTION ~
+                                                        *grip-inspection*
+  gs              Preview staged SQL in floating window
+  gc              Copy staged SQL to clipboard
+  gi              Table info (columns, types, PKs)
+  ge              Explain cell under cursor (type, nullable, constraints)
+
+COLUMN PINNING ~
+                                                     *grip-column-pinning*
+  1 - 9           Pin/freeze N leftmost columns with thick separator
+  0               Unpin all (or first column if none pinned)
+
+YANKING ~
+                                                           *grip-yanking*
+  y               Yank cell value to system clipboard
+  Y               Yank row as CSV
+  gY              Yank entire table as CSV
+
+SCHEMA AND WORKFLOW ~
+                                                          *grip-workflow*
+  go              Toggle schema browser sidebar
+  gT              Open table picker (fuzzy finder)
+  gQ              Open query pad (pre-filled with current query)
+
+ADVANCED ~
+                                                          *grip-advanced*
+  gl              Toggle live SQL floating preview
+  T               Toggle column type annotations on headers
+  r               Refresh (re-run query)
+  q               Close grip buffer
+  ?               Show help
+
+==============================================================================
+7. EDITING                                          *grip-editing-workflow*
+
+Grip uses a staging model for edits. Changes are staged in memory and
+color-coded in the grid before being applied to the database.
+
+Color coding:
+  Blue ............. Modified cell (staged change)
+  Red .............. Row marked for deletion
+  Green ............ Newly inserted row
+
+Workflow:
+  1. Edit cells with `e`, set NULL with `n`, paste with `p`
+  2. Insert rows with `o`, mark deletions with `d`
+  3. Preview staged SQL with `gs` or live preview with `gl`
+  4. Apply all changes with `a` (wraps in BEGIN/COMMIT transaction)
+  5. Undo individual edits with `u` or reset all with `U`
+
+All DML is wrapped in a transaction. If any statement fails, the entire
+transaction is rolled back and your staged changes are preserved so you
+can fix the value and retry.
+
+Multi-level undo: every edit operation pushes the previous state onto a
+50-deep undo stack. Press `u` repeatedly to step back through your edit
+history. Press `U` to reset to the original state in one step.
+
+Read-only mode is auto-detected when no primary key exists on the table
+(grip needs PKs for WHERE clauses in UPDATE/DELETE statements).
+
+==============================================================================
+8. SORT, FILTER, PAGINATE                           *grip-sort-filter-page*
+
+Sort ~
+Press `s` on a column header to cycle through ASC, DESC, and off. The
+query is re-run with an ORDER BY clause. Press `S` to stack a secondary
+sort (multi-column sorting).
+
+Filter ~
+Press `f` on a cell to quick-filter by that value (column = value).
+Press `<C-f>` to enter a freeform WHERE clause. Multiple filters are
+AND-ed together. Press `F` to clear all filters.
+
+Paginate ~
+Results are paginated (default 100 rows per page). The status line shows
+the current page and total. Press `]p`/`[p` to navigate pages, or
+`]P`/`[P` to jump to the last/first page.
+
+Press `X` to reset all sort, filter, and pagination state at once.
+
+==============================================================================
+9. FOREIGN KEY NAVIGATION                               *grip-fk-nav-full*
+
+Press `gf` on a cell that contains a foreign key value to navigate to the
+referenced row in the target table. A new grid opens showing just that
+row. Press `<C-o>` to go back. The title bar shows a breadcrumb trail
+of your navigation path.
+
+FK metadata is fetched automatically via information_schema (PostgreSQL,
+MySQL, DuckDB) or PRAGMA foreign_key_list (SQLite).
+
+==============================================================================
+10. SCHEMA BROWSER                                          *grip-schema*
+
+Toggle with `:GripSchema` or `go` from a grid buffer. Opens a left sidebar
+showing all tables and views for the current connection.
+
+Schema browser keymaps:
+  <CR>            Open table in grid (or open parent table from column)
+  l / zo          Expand table to show columns
+  h / zc          Collapse table
+  L               Expand all tables
+  H               Collapse all tables
+  /               Filter tables by name
+  r               Refresh schema (re-fetch table list)
+  gT              Open table picker
+  gQ              Open query pad
+  q / <Esc>       Close sidebar
+
+Columns show type abbreviations (int, text, bool, vc(255), etc.) and
+markers for primary keys and foreign keys.
+
+==============================================================================
+11. QUERY PAD                                             *grip-query-pad*
+
+Open with `:GripQuery` or `gQ` from a grid buffer. Creates a scratch SQL
+buffer with filetype=sql (enables vim-dadbod-completion if installed).
+
+Query pad keymaps:
+  <C-CR>          Execute buffer contents into a grip grid (normal/insert)
+  <C-CR>          Execute visual selection into a grip grid (visual mode)
+  <C-s>           Save query with :GripSave
+
+The query pad sets b:db to the current connection URL, which enables
+vim-dadbod-completion for table and column name auto-completion.
+
+==============================================================================
+12. SAVED QUERIES                                      *grip-saved-queries*
+
+Save queries to project-local .grip/queries/ directory:
+
+  :GripSave report        saves to .grip/queries/report.sql
+  :GripLoad report        loads .grip/queries/report.sql
+  :GripLoad               shows picker of saved queries
+
+The project root is detected by walking up from the current directory
+looking for .git or .grip directories.
+
+==============================================================================
+13. CONNECTIONS                                          *grip-connections*
+
+`:GripConnect` manages database connections from multiple sources:
+
+  .grip/connections.json     project-local connection profiles
+  g:dbs                      vim-dadbod-ui compatible table
+  $DATABASE_URL              environment variable
+  g:db / b:db                vim-dadbod variables
+
+Add a new connection: >
+  :GripConnect postgresql://user:pass@localhost/mydb
+<
+Or run `:GripConnect` with no arguments to pick from known connections
+or add a new one interactively.
+
+Connections are deduplicated by URL across all sources.
+
+==============================================================================
+14. EXPORT                                                   *grip-export*
+
+Press `gE` in a grid to export the current view. Five formats are
+available:
+
+  CSV .............. RFC 4180 compliant, quoted fields
+  TSV .............. Tab-separated values
+  JSON ............. Array of objects
+  SQL INSERT ....... INSERT statements for the current table
+  Markdown ......... GitHub-flavored markdown table
+
+All formats are copied to the system clipboard.
+
+Additional yank commands:
+  y ................ Yank single cell value
+  Y ................ Yank entire row as CSV
+  gY ............... Yank entire table as CSV
+
+==============================================================================
+15. ADAPTERS                                               *grip-adapters*
+
+Grip supports four database adapters. The adapter is selected automatically
+based on the connection URL scheme.
+
+  postgresql:// .... PostgreSQL via psql CLI
+  sqlite: .......... SQLite via sqlite3 CLI
+  mysql:// ......... MySQL/MariaDB via mysql CLI
+  duckdb: .......... DuckDB via duckdb CLI
+
+Each adapter implements: query, execute, get_primary_keys, get_column_info,
+get_foreign_keys, list_tables, and explain.
+
+File-as-table: `:Grip /path/to/data.parquet` routes through DuckDB to
+query Parquet, CSV, JSON, NDJSON, and XLSX files directly. No database
+connection is needed for file queries.
+
+==============================================================================
+16. PUBLIC API                                                  *grip-api*
+
+                                                          *grip.setup()*
+grip.setup({opts})
+  Optional configuration override. Called automatically with defaults by
+  the plugin loader.
+
+  Parameters:
+    limit         (number)  Default row limit. Default: 100
+    max_col_width (number)  Max display width per column. Default: 40
+    timeout       (number)  Query timeout in ms. Default: 10000
+
+                                                           *grip.open()*
+grip.open({arg}, {url}, {opts})
+  Open a table, run a query, or open a file.
+
+  Parameters:
+    arg   (string)  Table name, SQL query, or file path
+    url   (string)  Connection URL (optional, uses current connection)
+    opts  (table)   Optional: { reuse_win = winid }
+
+                                                     *grip.open_smart()*
+grip.open_smart()
+  Auto-detects context from the current buffer:
+    - DBUI SQL buffer: opens that table, reuses dbout window
+    - dbout result buffer: traces back to source table
+    - Normal buffer: uses word under cursor as table name
+
+==============================================================================
+vim:tw=78:ts=8:ft=help:norl:

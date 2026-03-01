@@ -62,9 +62,9 @@ The single biggest gap in the Neovim database ecosystem. DataGrip, DBeaver, Post
 - [x] Smart column auto-fit: distributes extra terminal width to truncated columns
 - [ ] Column hide/show toggle
 - [x] Conditional cell formatting: negatives red, booleans colored, dates dimmed if past, URLs underlined
-- [ ] Batch edit: visual block select, set all selected cells to same value
+- [x] Batch edit: visual select rows, set all selected cells to same value (e/d/n in visual mode)
 - [ ] Copy/paste between cells
-- [ ] Undo history (multi-level, not just per-row)
+- [x] Undo history: multi-level undo stack (50 deep), u pops, U resets
 
 ## v2.0.0 - Standalone Workflow - Done
 
@@ -92,4 +92,4 @@ Makes vim-dadbod-ui optional. grip + vim-dadbod = complete DB workflow.
 
 - [ ] Automated tests and CI (GitHub Actions)
 - [ ] Performance profiling on large tables (1000+ rows)
-- [ ] Documentation (vimdoc help file)
+- [x] Documentation (vimdoc help file: doc/dadbod-grip.txt)

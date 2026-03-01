@@ -39,7 +39,8 @@ Then `:GripConnect` to set your database, `:GripSchema` to browse, and `:Grip` t
 - **Visual change staging** with color-coded rows (blue=modified, red=deleted, green=inserted).
 - **Pure SQL generation** with live preview before applying changes.
 - **Transaction safety** wraps all DML in BEGIN/COMMIT with ROLLBACK on error.
-- **Immutable state management** with full undo (per-row and global).
+- **Batch editing** in visual mode to set, delete, or NULL multiple rows at once.
+- **Immutable state management** with multi-level undo (50-deep stack).
 
 ### Query and Navigation
 - **Sort, filter, and pagination** using `s`/`S` to sort, `f`/`<C-f>`/`F` to filter, and `]p`/`[p` to page.
@@ -105,9 +106,17 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `p` | Paste clipboard into cell |
 | `o` | Insert new row after cursor |
 | `d` | Toggle delete on current row |
-| `u` | Undo changes on current row |
-| `U` | Undo all staged changes |
+| `u` | Undo last edit (multi-level) |
+| `U` | Undo all (reset to original) |
 | `a` | Apply all staged changes to DB |
+
+### Batch Editing (visual mode)
+
+| Key | Action |
+|-----|--------|
+| `e` | Set all selected cells in column to same value |
+| `d` | Toggle delete on all selected rows |
+| `n` | Set all selected cells in column to NULL |
 
 ### Sort / Filter / Pagination
 
@@ -392,6 +401,8 @@ Open each table with `:Grip <table_name>` and verify rendering, editing, sort/fi
 | **EXPLAIN** | Yes (colored) | No | No | No | No |
 | **Export** | 5 formats | No | No | No | CSV |
 | **Column pinning** | Yes (1-9) | No | No | No | No |
+| **Batch edit** | Yes (visual) | No | No | No | No |
+| **Multi-level undo** | Yes (50-deep) | No | No | No | No |
 | **Cell formatting** | Yes (auto) | No | No | No | No |
 | **File-as-table** | Yes (DuckDB) | No | No | No | No |
 | **Transactions** | Yes (atomic) | No | No | No | No |
