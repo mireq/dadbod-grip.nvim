@@ -117,7 +117,7 @@ Full table metadata: columns, types, PKs, FKs, indexes, row estimates, and size.
 - **Immutable state management** with multi-level undo (50-deep stack).
 
 ### Query and Navigation
-- **Sort, filter, and pagination** using `s`/`S` to sort, `f`/`<C-f>`/`F` to filter, and `]p`/`[p` to page.
+- **Sort, filter, and pagination** using `s`/`S` to sort, `f`/`<C-f>`/`F` to filter, `gp`/`gP` for saved filter presets, and `]p`/`[p` to page.
 - **Foreign key navigation** via `gf` to follow a FK to its referenced row, and `<C-o>` to go back.
 - **Column statistics** via `gS` showing count, distinct, nulls, min/max, and top values.
 - **Aggregate on selection** via `ga` in visual mode showing count/sum/avg/min/max.
@@ -143,11 +143,12 @@ Full table metadata: columns, types, PKs, FKs, indexes, row estimates, and size.
 - **Conditional formatting** that colors negatives red, booleans green/red, past dates dim, and URLs underlined.
 - **Column hide/show** using `-` to hide, `g-` to restore all, and `gH` for a visibility picker.
 - **Smart column auto-fit** that distributes extra terminal width to truncated columns.
-- **Export** in 5 formats via `gE`: CSV, TSV, JSON, SQL INSERT, and Markdown.
+- **Export** in 6 formats via `gE`: CSV, TSV, JSON, SQL INSERT, Markdown, and Grip Table (box-drawing).
 
 ### Multi-Database
 - **PostgreSQL, SQLite, MySQL/MariaDB, and DuckDB** adapters with adapter-specific metadata queries.
 - **File-as-table** support where `:Grip /path/to/data.parquet` opens Parquet/CSV/JSON/XLSX files via DuckDB.
+- **Remote file querying** where `:Grip https://example.com/data.csv` opens remote files via DuckDB httpfs.
 
 ### Additional
 - **Composite primary key support** for multi-column WHERE clauses.
@@ -215,6 +216,8 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `f` | Quick filter by cell value |
 | `<C-f>` | Freeform WHERE clause filter |
 | `F` | Clear all filters |
+| `gp` | Load saved filter preset |
+| `gP` | Save current filter as preset |
 | `X` | Reset view (clear sort/filter/page) |
 | `]p` / `[p` | Next / previous page |
 | `]P` / `[P` | Last / first page |
@@ -234,7 +237,7 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `gS` | Column statistics popup |
 | `gx` | Explain current query plan |
 | `gD` | Diff against another table |
-| `gE` | Export table (CSV, TSV, JSON, SQL INSERT, Markdown) |
+| `gE` | Export table (CSV, TSV, JSON, SQL INSERT, Markdown, Grip Table) |
 
 ### Inspection
 
@@ -382,6 +385,7 @@ vim.keymap.set("n", "<leader>lg", "<cmd>Grip<cr>", { desc = "Open Grip grid" })
 :Grip users                           → open table in editable grid
 :Grip SELECT * FROM orders LIMIT 50   → run arbitrary SQL
 :Grip /path/to/data.parquet           → open file via DuckDB
+:Grip https://example.com/data.csv   → open remote file via httpfs
 :GripExplain                          → EXPLAIN current query
 ```
 
@@ -410,7 +414,7 @@ grip.open_smart()
 
 ## Architecture
 
-Sixteen modules with strict boundaries:
+Seventeen modules with strict boundaries:
 
 ```
 init.lua        → Entry point. Commands, callbacks, orchestration.
@@ -425,6 +429,7 @@ picker.lua      → Table picker. Telescope → fzf-lua → vim.ui.select.
 query_pad.lua   → SQL scratch buffer → grip grid results.
 saved.lua       → Query persistence in .grip/queries/*.sql.
 connections.lua → Connection profiles. .grip/connections.json + g:dbs.
+filters.lua     → Saved filter presets. .grip/filters.json per table.
 properties.lua  → Table properties float. Columns, indexes, stats, DDL keymaps.
 ddl.lua         → Schema operations. Rename, add/drop column, create/drop table.
 diff.lua        → Data diff engine. PK-matched row comparison with color coding.
@@ -504,7 +509,7 @@ Open each table with `:Grip <table_name>` and verify rendering, editing, sort/fi
 | **Connections** | Yes | No | No | Yes | Yes |
 | **Column stats** | Yes | No | No | No | No |
 | **EXPLAIN** | Yes (colored) | No | No | No | No |
-| **Export** | 5 formats | No | No | No | CSV |
+| **Export** | 6 formats | No | No | No | CSV |
 | **Column pinning** | Yes (1-9) | No | No | No | No |
 | **Batch edit** | Yes (visual) | No | No | No | No |
 | **Multi-level undo** | Yes (50-deep) | No | No | No | No |

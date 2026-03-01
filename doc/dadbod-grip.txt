@@ -106,14 +106,15 @@ No default keymaps are set outside the grip buffer.
 All commands are global and available after the plugin loads.
 
                                                                      *:Grip*
-:Grip [table|SQL|file]
-  Open a table in an editable grid, run a SQL query, or open a file as a
-  table via DuckDB.
+:Grip [table|SQL|file|URL]
+  Open a table in an editable grid, run a SQL query, open a local file,
+  or query a remote file via DuckDB httpfs.
 
   Examples: >
     :Grip users
     :Grip SELECT * FROM orders LIMIT 50
     :Grip /path/to/data.parquet
+    :Grip https://example.com/data.csv
 <
 
                                                                *:GripSchema*
@@ -225,6 +226,8 @@ SORT / FILTER / PAGINATION ~
   f               Quick filter by cell value (column = value)
   <C-f>           Freeform WHERE clause filter
   F               Clear all filters
+  gp              Load saved filter preset for current table
+  gP              Save current filter as named preset
   X               Reset view (clear sort, filter, and page)
   ]p / [p         Next / previous page
   ]P / [P         Last / first page
@@ -325,6 +328,12 @@ Press `f` on a cell to quick-filter by that value (column = value).
 Press `<C-f>` to enter a freeform WHERE clause. Multiple filters are
 AND-ed together. Press `F` to clear all filters.
 
+Filter presets ~
+Press `gP` to save the current active filters as a named preset for the
+current table. Presets are stored in `.grip/filters.json` keyed by table
+name. Press `gp` to load a saved preset. The picker supports telescope,
+fzf-lua, and vim.ui.select.
+
 Paginate ~
 Results are paginated (default 100 rows per page). The status line shows
 the current page and total. Press `]p`/`[p` to navigate pages, or
@@ -413,7 +422,7 @@ Connections are deduplicated by URL across all sources.
 ==============================================================================
 14. EXPORT                                                   *grip-export*
 
-Press `gE` in a grid to export the current view. Five formats are
+Press `gE` in a grid to export the current view. Six formats are
 available:
 
   CSV .............. RFC 4180 compliant, quoted fields
@@ -421,6 +430,7 @@ available:
   JSON ............. Array of objects
   SQL INSERT ....... INSERT statements for the current table
   Markdown ......... GitHub-flavored markdown table
+  Grip Table ....... Box-drawing table matching the grid style
 
 All formats are copied to the system clipboard.
 
@@ -482,6 +492,11 @@ get_foreign_keys, get_indexes, get_table_stats, list_tables, and explain.
 File-as-table: `:Grip /path/to/data.parquet` routes through DuckDB to
 query Parquet, CSV, JSON, NDJSON, and XLSX files directly. No database
 connection is needed for file queries.
+
+Remote file querying: `:Grip https://example.com/data.csv` opens remote
+files via DuckDB's httpfs extension. The extension is loaded automatically.
+HTTP queries use a 30-second timeout. Supported formats are the same as
+file-as-table. All remote queries open in read-only mode.
 
 ==============================================================================
 17. PUBLIC API                                                  *grip-api*
