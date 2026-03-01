@@ -84,7 +84,7 @@ local function format_cell(value, width, is_null_staged)
     local sw = vim.fn.strdisplaywidth(s)
     return s .. string.rep(" ", width - sw), "GripReadonly"
   end
-  local display = value ~= "" and value or NULL_DISPLAY
+  local display = value ~= "" and value:gsub("\n", "↵"):gsub("\r", "") or NULL_DISPLAY
   local hl = value == "" and "GripNull" or nil
   local dw = vim.fn.strdisplaywidth(display)
   if dw > width then
