@@ -175,6 +175,20 @@ function M.list_tables(url)
   return adapter.list_tables(conn)
 end
 
+function M.get_indexes(table_name, url)
+  local adapter, conn, err = resolve(url)
+  if not adapter then return {}, err end
+  if not adapter.get_indexes then return {}, "Adapter does not support get_indexes" end
+  return adapter.get_indexes(table_name, conn)
+end
+
+function M.get_table_stats(table_name, url)
+  local adapter, conn, err = resolve(url)
+  if not adapter then return nil, err end
+  if not adapter.get_table_stats then return nil, "Adapter does not support get_table_stats" end
+  return adapter.get_table_stats(table_name, conn)
+end
+
 function M.explain(sql_str, url)
   local adapter, conn, err = resolve(url)
   if not adapter then return nil, err end

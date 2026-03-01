@@ -184,6 +184,83 @@ function M.list_tables(url)
   return result, nil
 end
 
+function M.get_indexes(table_name, url)
+  local db_path = extract_path(url)
+  if not db_path then return {}, "Invalid SQLite URL: " .. url end
+
+  local tbl = table_name:gsub('^"', ''):gsub('"$', '')
+  tbl = tbl:match("^[^.]+%.(.+)$") or tbl
+
+  -- Get index list
+  local stdout, stderr, code = sqlite3(db_path, string.format("PRAGMA index_list(%s)", tbl))
+  if code ~= 0 then
+    return {}, stderr ~= "" and stderr or "Failed to query indexes"
+  end
+
+  local parsed = db_util.parse_csv(stdout)
+  if not parsed then return {} end
+
+  -- PRAGMA index_list columns: seq, name, unique, origin, partial
+  local indexes = {}
+  for _, row in ipairs(parsed.rows) do
+    local idx_name = row[2] or ""
+    local is_unique = row[3] == "1"
+    local origin = row[4] or ""
+    local idx_type = origin == "pk" and "PRIMARY" or (is_unique and "UNIQUE" or "INDEX")
+
+    -- Get columns for this index
+    local col_stdout = sqlite3(db_path, string.format("PRAGMA index_info(%s)", idx_name))
+    local col_parsed = db_util.parse_csv(col_stdout)
+    local cols = {}
+    if col_parsed then
+      -- PRAGMA index_info columns: seqno, cid, name
+      for _, crow in ipairs(col_parsed.rows) do
+        table.insert(cols, crow[3] or "")
+      end
+    end
+
+    table.insert(indexes, {
+      name = idx_name,
+      type = idx_type,
+      columns = cols,
+    })
+  end
+  return indexes, nil
+end
+
+function M.get_table_stats(table_name, url)
+  local db_path = extract_path(url)
+  if not db_path then return nil, "Invalid SQLite URL: " .. url end
+
+  local tbl = table_name:gsub('^"', ''):gsub('"$', '')
+  tbl = tbl:match("^[^.]+%.(.+)$") or tbl
+
+  -- Row count (exact, SQLite doesn't have estimates)
+  local stdout, _, code = sqlite3(db_path, string.format("SELECT COUNT(*) FROM \"%s\"", tbl:gsub('"', '""')))
+  local row_count = 0
+  if code == 0 then
+    for line in stdout:gmatch("([^\n]+)") do
+      local n = tonumber(line)
+      if n then row_count = n end
+    end
+  end
+
+  -- DB file size (page_count * page_size)
+  local size_stdout = sqlite3(db_path, "SELECT page_count * page_size FROM pragma_page_count, pragma_page_size")
+  local size_bytes = 0
+  if size_stdout then
+    for line in size_stdout:gmatch("([^\n]+)") do
+      local n = tonumber(line)
+      if n then size_bytes = n end
+    end
+  end
+
+  return {
+    row_estimate = row_count,
+    size_bytes = size_bytes,
+  }, nil
+end
+
 function M.execute(sql_str, url)
   if vim.fn.executable("sqlite3") == 0 then
     return nil, "sqlite3 not found. Install sqlite."

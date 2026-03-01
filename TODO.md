@@ -60,7 +60,7 @@ The single biggest gap in the Neovim database ecosystem. DataGrip, DBeaver, Post
 
 - [x] Column pinning/freezing: number keys (1-9) to freeze N leftmost columns (pspg-style)
 - [x] Smart column auto-fit: distributes extra terminal width to truncated columns
-- [ ] Column hide/show toggle
+- [x] Column hide/show toggle: `-` hide, `g-` restore, `gH` picker
 - [x] Conditional cell formatting: negatives red, booleans colored, dates dimmed if past, URLs underlined
 - [x] Batch edit: visual select rows, set all selected cells to same value (e/d/n in visual mode)
 - [x] Copy/paste between cells: visual y yanks column slice, P pastes into consecutive rows
@@ -82,7 +82,7 @@ Makes vim-dadbod-ui optional. grip + vim-dadbod = complete DB workflow.
 
 ## Future - Schema Operations (DDL)
 
-- [ ] Table properties view (columns, types, constraints, defaults)
+- [x] Table properties view: `gI` / `:GripProperties` float with columns, indexes, stats
 - [ ] Column rename (ALTER TABLE ... RENAME COLUMN)
 - [ ] Column add/drop with type/nullable/default
 - [ ] Edit column properties with adapter-aware DDL generation

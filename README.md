@@ -156,6 +156,7 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `gs` | Preview staged SQL in float |
 | `gc` | Copy staged SQL to clipboard |
 | `gi` | Table info (columns, types, PKs) |
+| `gI` | Table properties (columns, indexes, stats) |
 | `ge` | Explain cell under cursor |
 
 ### Column Pinning
@@ -203,6 +204,7 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `:GripLoad [name]` | Load a saved query (picker if no name) |
 | `:GripConnect [url]` | Switch database connection (picker if no arg) |
 | `:GripExplain [sql]` | Render EXPLAIN plan for current or given query |
+| `:GripProperties [table]` | Show table properties (columns, indexes, stats) |
 
 ## Requirements
 

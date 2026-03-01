@@ -589,6 +589,34 @@ function M.setup(opts)
     desc  = "Load a saved query",
   })
 
+  -- Register :GripProperties command
+  vim.api.nvim_create_user_command("GripProperties", function(cmd_opts)
+    local arg = vim.trim(cmd_opts.args or "")
+    local table_name = arg ~= "" and arg or nil
+    -- Try to get table name from current grip session
+    if not table_name then
+      local bufnr = vim.api.nvim_get_current_buf()
+      local session = view._sessions[bufnr]
+      if session and session.state.table_name then
+        table_name = session.state.table_name
+      end
+    end
+    if not table_name then
+      vim.notify("GripProperties: provide a table name or run from a Grip buffer", vim.log.levels.WARN)
+      return
+    end
+    local url = db.get_url()
+    if not url then
+      vim.notify("GripProperties: no database connection", vim.log.levels.WARN)
+      return
+    end
+    local properties = require("dadbod-grip.properties")
+    properties.open(table_name, url)
+  end, {
+    nargs = "?",
+    desc  = "Show table properties (columns, indexes, stats)",
+  })
+
   -- Register :GripConnect command
   vim.api.nvim_create_user_command("GripConnect", function(cmd_opts)
     local connections = require("dadbod-grip.connections")

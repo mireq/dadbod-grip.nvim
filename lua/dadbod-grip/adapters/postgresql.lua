@@ -204,6 +204,87 @@ function M.list_tables(url)
   return result, nil
 end
 
+function M.get_indexes(table_name, url)
+  local schema, tbl = table_name:match("^([^.]+)%.(.+)$")
+  if not schema then
+    schema = "public"
+    tbl = table_name
+  end
+
+  local idx_sql = string.format([[
+    SELECT
+      indexname,
+      CASE WHEN indisunique AND indisprimary THEN 'PRIMARY'
+           WHEN indisunique THEN 'UNIQUE'
+           ELSE 'INDEX'
+      END AS index_type,
+      array_to_string(ARRAY(
+        SELECT a.attname
+        FROM unnest(i.indkey) AS k
+        JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k
+      ), ', ') AS columns
+    FROM pg_indexes pi
+    JOIN pg_class c ON c.relname = pi.indexname AND c.relnamespace = (
+      SELECT oid FROM pg_namespace WHERE nspname = '%s'
+    )
+    JOIN pg_index i ON i.indexrelid = c.oid
+    WHERE pi.schemaname = '%s' AND pi.tablename = '%s'
+    ORDER BY indisprimary DESC, indexname
+  ]], schema:gsub("'", "''"), schema:gsub("'", "''"), tbl:gsub("'", "''"))
+
+  local stdout, stderr, code = psql(url, idx_sql)
+  if code ~= 0 then
+    return {}, stderr ~= "" and stderr or "Failed to query indexes"
+  end
+
+  local parsed = db_util.parse_csv(stdout)
+  if not parsed then return {} end
+
+  local indexes = {}
+  for _, row in ipairs(parsed.rows) do
+    local cols = {}
+    for col in (row[3] or ""):gmatch("([^,]+)") do
+      table.insert(cols, vim.trim(col))
+    end
+    table.insert(indexes, {
+      name = row[1] or "",
+      type = row[2] or "INDEX",
+      columns = cols,
+    })
+  end
+  return indexes, nil
+end
+
+function M.get_table_stats(table_name, url)
+  local schema, tbl = table_name:match("^([^.]+)%.(.+)$")
+  if not schema then
+    schema = "public"
+    tbl = table_name
+  end
+
+  local stats_sql = string.format([[
+    SELECT
+      COALESCE(c.reltuples::bigint, 0) AS row_estimate,
+      COALESCE(pg_total_relation_size(c.oid), 0) AS size_bytes
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = '%s' AND c.relname = '%s'
+  ]], schema:gsub("'", "''"), tbl:gsub("'", "''"))
+
+  local stdout, stderr, code = psql(url, stats_sql)
+  if code ~= 0 then
+    return nil, stderr ~= "" and stderr or "Failed to query table stats"
+  end
+
+  local parsed = db_util.parse_csv(stdout)
+  if not parsed or #parsed.rows == 0 then return nil, "No stats found" end
+
+  return {
+    row_estimate = tonumber(parsed.rows[1][1]) or 0,
+    size_bytes = tonumber(parsed.rows[1][2]) or 0,
+  }, nil
+end
+
 function M.execute(sql_str, url)
   if vim.fn.executable("psql") == 0 then
     return nil, "psql not found. Install postgresql-client."

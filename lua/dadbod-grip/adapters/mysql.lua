@@ -329,6 +329,86 @@ function M.list_tables(url)
   return result, nil
 end
 
+function M.get_indexes(table_name, url)
+  local parsed_url = parse_url(url)
+  if not parsed_url then return {}, "Invalid MySQL URL: " .. url end
+
+  local schema, tbl = table_name:match("^([^.]+)%.(.+)$")
+  if not schema then
+    schema = parsed_url.dbname
+    tbl = table_name
+  end
+
+  local idx_sql = string.format([[
+    SELECT
+      INDEX_NAME,
+      CASE
+        WHEN INDEX_NAME = 'PRIMARY' THEN 'PRIMARY'
+        WHEN NON_UNIQUE = 0 THEN 'UNIQUE'
+        ELSE 'INDEX'
+      END AS index_type,
+      GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ', ') AS columns
+    FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = '%s' AND TABLE_NAME = '%s'
+    GROUP BY INDEX_NAME, NON_UNIQUE
+    ORDER BY INDEX_NAME = 'PRIMARY' DESC, INDEX_NAME
+  ]], schema:gsub("'", "''"), tbl:gsub("'", "''"))
+
+  local stdout, stderr, code = mysql_query(parsed_url, idx_sql)
+  if code ~= 0 then
+    return {}, stderr ~= "" and stderr or "Failed to query indexes"
+  end
+
+  local result = db_util.parse_csv(stdout)
+  if not result then return {} end
+
+  local indexes = {}
+  for _, row in ipairs(result.rows) do
+    local cols = {}
+    for col in (row[3] or ""):gmatch("([^,]+)") do
+      table.insert(cols, vim.trim(col))
+    end
+    table.insert(indexes, {
+      name = row[1] or "",
+      type = row[2] or "INDEX",
+      columns = cols,
+    })
+  end
+  return indexes, nil
+end
+
+function M.get_table_stats(table_name, url)
+  local parsed_url = parse_url(url)
+  if not parsed_url then return nil, "Invalid MySQL URL: " .. url end
+
+  local schema, tbl = table_name:match("^([^.]+)%.(.+)$")
+  if not schema then
+    schema = parsed_url.dbname
+    tbl = table_name
+  end
+
+  local stats_sql = string.format([[
+    SELECT
+      TABLE_ROWS,
+      DATA_LENGTH + INDEX_LENGTH AS size_bytes
+    FROM information_schema.TABLES
+    WHERE TABLE_SCHEMA = '%s' AND TABLE_NAME = '%s'
+  ]], schema:gsub("'", "''"), tbl:gsub("'", "''"))
+
+  local stdout, stderr, code = mysql_query(parsed_url, stats_sql)
+  if code ~= 0 then
+    return nil, stderr ~= "" and stderr or "Failed to query table stats"
+  end
+
+  local result = db_util.parse_csv(stdout)
+  if not result or #result.rows == 0 then return nil, "No stats found" end
+
+  return {
+    row_estimate = tonumber(result.rows[1][1]) or 0,
+    size_bytes = tonumber(result.rows[1][2]) or 0,
+  }, nil
+end
+
 function M.execute(sql_str, url)
   if vim.fn.executable("mysql") == 0 then
     return nil, "mysql not found. Install mysql-client."

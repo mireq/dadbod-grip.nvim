@@ -151,6 +151,12 @@ All commands are global and available after the plugin loads.
   Render EXPLAIN plan for the current query or a given SQL string.
   Color-codes cost levels: green (low), yellow (medium), red (high).
 
+                                                          *:GripProperties*
+:GripProperties [table]
+  Show full table properties in a floating window. Includes columns with
+  types, primary keys, foreign keys, indexes, row estimate, and table size.
+  Uses the current grip table if no argument is provided.
+
 ==============================================================================
 6. KEYBINDINGS                                           *grip-keybindings*
 
@@ -220,6 +226,7 @@ INSPECTION ~
   gs              Preview staged SQL in floating window
   gc              Copy staged SQL to clipboard
   gi              Table info (columns, types, PKs)
+  gI              Table properties (columns, indexes, stats)
   ge              Explain cell under cursor (type, nullable, constraints)
 
 COLUMN PINNING ~

@@ -1154,6 +1154,20 @@ function M._setup_keymaps(bufnr)
     open_info_float(grip_win, lines, { title = " Table Info " })
   end, "Table info")
 
+  -- gI: full table properties float
+  map("gI", function()
+    local session = M._sessions[bufnr]
+    if not session then return end
+    local st = session.state
+    if not st.table_name then
+      vim.notify("Table properties requires a table name", vim.log.levels.INFO)
+      return
+    end
+    local properties = require("dadbod-grip.properties")
+    local grip_win = vim.api.nvim_get_current_win()
+    properties.open(st.table_name, st.url, grip_win)
+  end, "Table properties")
+
   -- ge: explain cell
   map("ge", function()
     local session = M._sessions[bufnr]
@@ -2319,6 +2333,7 @@ function M._setup_keymaps(bufnr)
         "  gs        Preview staged SQL",
         "  gc        Copy staged SQL to clipboard",
         "  gi        Table info (columns, types, PKs)",
+        "  gI        Table properties (full detail)",
         "  ge        Explain cell under cursor",
         "",
         "  Advanced",

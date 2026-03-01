@@ -263,6 +263,93 @@ function M.list_tables(url)
   return result, nil
 end
 
+function M.get_indexes(table_name, url)
+  local db_path = extract_path(url)
+  if not db_path then return {}, "Invalid DuckDB URL: " .. url end
+
+  local schema, tbl = table_name:match("^([^.]+)%.(.+)$")
+  if not schema then
+    schema = "main"
+    tbl = table_name
+  end
+
+  local idx_sql = string.format([[
+    SELECT
+      index_name,
+      CASE WHEN is_unique AND is_primary THEN 'PRIMARY'
+           WHEN is_unique THEN 'UNIQUE'
+           ELSE 'INDEX'
+      END AS index_type,
+      (SELECT string_agg(column_name, ', ')
+       FROM information_schema.key_column_usage kcu
+       JOIN information_schema.table_constraints tc
+         ON tc.constraint_name = kcu.constraint_name
+         AND tc.table_schema = kcu.table_schema
+       WHERE tc.table_schema = di.schema_name
+         AND tc.table_name = di.table_name
+         AND tc.constraint_type = CASE WHEN di.is_primary THEN 'PRIMARY KEY' ELSE 'UNIQUE' END
+      ) AS columns
+    FROM duckdb_indexes() di
+    WHERE di.schema_name = '%s' AND di.table_name = '%s'
+    ORDER BY is_primary DESC, index_name
+  ]], schema:gsub("'", "''"), tbl:gsub("'", "''"))
+
+  local stdout, stderr, code = duckdb(db_path, idx_sql)
+  if code ~= 0 then
+    -- DuckDB may not support duckdb_indexes() in all versions; fallback
+    return {}, nil
+  end
+
+  local parsed = db_util.parse_csv(stdout)
+  if not parsed then return {} end
+
+  local indexes = {}
+  for _, row in ipairs(parsed.rows) do
+    local cols = {}
+    for col in (row[3] or ""):gmatch("([^,]+)") do
+      table.insert(cols, vim.trim(col))
+    end
+    table.insert(indexes, {
+      name = row[1] or "",
+      type = row[2] or "INDEX",
+      columns = cols,
+    })
+  end
+  return indexes, nil
+end
+
+function M.get_table_stats(table_name, url)
+  local db_path = extract_path(url)
+  if not db_path then return nil, "Invalid DuckDB URL: " .. url end
+
+  local schema, tbl = table_name:match("^([^.]+)%.(.+)$")
+  if not schema then
+    schema = "main"
+    tbl = table_name
+  end
+
+  local stats_sql = string.format([[
+    SELECT
+      estimated_size,
+      0 AS size_bytes
+    FROM duckdb_tables()
+    WHERE schema_name = '%s' AND table_name = '%s'
+  ]], schema:gsub("'", "''"), tbl:gsub("'", "''"))
+
+  local stdout, stderr, code = duckdb(db_path, stats_sql)
+  if code ~= 0 then
+    return nil, stderr ~= "" and stderr or "Failed to query table stats"
+  end
+
+  local parsed = db_util.parse_csv(stdout)
+  if not parsed or #parsed.rows == 0 then return nil, "No stats found" end
+
+  return {
+    row_estimate = tonumber(parsed.rows[1][1]) or 0,
+    size_bytes = tonumber(parsed.rows[1][2]) or 0,
+  }, nil
+end
+
 function M.execute(sql_str, url)
   if vim.fn.executable("duckdb") == 0 then
     return nil, "duckdb not found. Install duckdb."
