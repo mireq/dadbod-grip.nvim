@@ -56,7 +56,7 @@ The single biggest gap in the Neovim database ecosystem. DataGrip, DBeaver, Post
 - [x] Column statistics: `gS` on a column for count, distinct, nulls, min/max, top values
 - [x] Additional export formats: `gE` picker for CSV, TSV, JSON, SQL INSERT, Markdown
 
-## v1.4.0 - Grid Enhancements
+## v1.4.0 - Grid Enhancements - Done
 
 - [x] Column pinning/freezing: number keys (1-9) to freeze N leftmost columns (pspg-style)
 - [x] Smart column auto-fit: distributes extra terminal width to truncated columns
@@ -80,7 +80,7 @@ Makes vim-dadbod-ui optional. grip + vim-dadbod = complete DB workflow.
 - [x] list_tables() adapter method for all 4 databases
 - [x] Data diff: `:GripDiff` / `gD` compares tables with PK-matched row highlighting
 
-## Future - Schema Operations (DDL)
+## v3.0.0 - Schema Operations (DDL) - Done
 
 - [x] Table properties view: `gI` / `:GripProperties` float with columns, indexes, stats
 - [x] Column rename: R in properties view, `:GripRename` command
@@ -90,6 +90,6 @@ Makes vim-dadbod-ui optional. grip + vim-dadbod = complete DB workflow.
 
 ## Ongoing
 
-- [ ] Automated tests and CI (GitHub Actions)
-- [ ] Performance profiling on large tables (1000+ rows)
-- [x] Documentation (vimdoc help file: doc/dadbod-grip.txt)
+- [x] Automated tests: 104 unit tests across 4 spec files, GitHub Actions CI
+- [x] Performance: structural sharing in data.lua, sampled column widths, profiling
+- [x] Documentation: vimdoc help file (doc/dadbod-grip.txt)

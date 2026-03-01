@@ -55,10 +55,19 @@ Then `:GripConnect` to set your database, `:GripSchema` to browse, and `:Grip` t
 - **SQL query pad** via `:GripQuery` or `gQ` opening a scratch buffer that pipes results into editable grids.
 - **Saved queries** via `:GripSave` and `:GripLoad` persisting to project-local `.grip/queries/` files.
 - **Connection profiles** via `:GripConnect` storing connections in `.grip/connections.json` with `g:dbs` backward compatibility.
+- **Data diff** via `:GripDiff` or `gD` comparing two tables by primary key with color-coded change highlighting.
+
+### Schema Operations (DDL)
+- **Table properties** via `gI` or `:GripProperties` showing columns, indexes, row count, and table size.
+- **Column rename** via `R` in properties view or `:GripRename` with DDL preview and confirmation.
+- **Column add/drop** via `+` and `-` in properties view with type prompts and destructive confirmation.
+- **Create table** via `:GripCreate` or `+` in schema browser with an interactive column designer.
+- **Drop table** via `:GripDrop` or `D` in schema browser with typed confirmation and CASCADE awareness.
 
 ### Display
 - **Column pinning** using `1`-`9` to freeze leftmost N columns with a thick separator, and `0` to unpin.
 - **Conditional formatting** that colors negatives red, booleans green/red, past dates dim, and URLs underlined.
+- **Column hide/show** using `-` to hide, `g-` to restore all, and `gH` for a visibility picker.
 - **Smart column auto-fit** that distributes extra terminal width to truncated columns.
 - **Export** in 5 formats via `gE`: CSV, TSV, JSON, SQL INSERT, and Markdown.
 
@@ -90,6 +99,9 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `G` | Last data row |
 | `0`/`^` | First column |
 | `$` | Last column |
+| `-` | Hide column under cursor |
+| `g-` | Restore all hidden columns |
+| `gH` | Column visibility picker |
 | `{`/`}` | Previous / next modified row |
 | `<CR>` | Expand cell value in popup |
 | `K` | Row view (vertical transpose) |
@@ -324,29 +336,32 @@ grip.open_smart()
 
 ## Architecture
 
-Fourteen modules with strict boundaries:
+Sixteen modules with strict boundaries:
 
 ```
-init.lua       → Entry point. Commands, callbacks, orchestration.
-view.lua       → Buffer rendering, keymaps, highlights. One buffer per session.
-editor.lua     → Float cell editor. One purpose, no state leaked.
-data.lua       → Immutable state transforms. State in, state out.
-query.lua      → Pure query composition. Spec (value) → SQL string.
-db.lua         → I/O boundary + adapter dispatch by URL scheme.
-sql.lua        → Pure SQL generation. No DB calls, no state.
-schema.lua     → Sidebar tree browser. Tables, columns, PK/FK markers.
-picker.lua     → Table picker. Telescope → fzf-lua → vim.ui.select.
-query_pad.lua  → SQL scratch buffer → grip grid results.
-saved.lua      → Query persistence in .grip/queries/*.sql.
+init.lua        → Entry point. Commands, callbacks, orchestration.
+view.lua        → Buffer rendering, keymaps, highlights. One buffer per session.
+editor.lua      → Float cell editor. One purpose, no state leaked.
+data.lua        → Immutable state transforms. State in, state out.
+query.lua       → Pure query composition. Spec (value) → SQL string.
+db.lua          → I/O boundary + adapter dispatch by URL scheme.
+sql.lua         → Pure SQL generation. No DB calls, no state.
+schema.lua      → Sidebar tree browser. Tables, columns, PK/FK markers, DDL.
+picker.lua      → Table picker. Telescope → fzf-lua → vim.ui.select.
+query_pad.lua   → SQL scratch buffer → grip grid results.
+saved.lua       → Query persistence in .grip/queries/*.sql.
 connections.lua → Connection profiles. .grip/connections.json + g:dbs.
-adapters/      → Per-database: postgresql, sqlite, mysql, duckdb.
+properties.lua  → Table properties float. Columns, indexes, stats, DDL keymaps.
+ddl.lua         → Schema operations. Rename, add/drop column, create/drop table.
+diff.lua        → Data diff engine. PK-matched row comparison with color coding.
+adapters/       → Per-database: postgresql, sqlite, mysql, duckdb.
 ```
 
 Design principles:
 - **Immutable state**: `data.lua` never mutates. Every operation returns a new state table.
 - **Query as value**: `query.lua` treats query specs as plain Lua tables composed by pure functions.
 - **I/O at the boundary**: Only `db.lua` and adapters run shell commands. Everything else is pure.
-- **Adapter pattern**: URL scheme → adapter module. Each adapter implements query, execute, get_primary_keys, get_column_info, get_foreign_keys, list_tables, and explain.
+- **Adapter pattern**: URL scheme → adapter module. Each adapter implements query, execute, get_primary_keys, get_column_info, get_foreign_keys, get_indexes, get_table_stats, list_tables, and explain.
 - **Transaction safety**: Apply wraps all DML in BEGIN/COMMIT with ROLLBACK on error.
 
 ## Testing
@@ -420,6 +435,9 @@ Open each table with `:Grip <table_name>` and verify rendering, editing, sort/fi
 | **Batch edit** | Yes (visual) | No | No | No | No |
 | **Multi-level undo** | Yes (50-deep) | No | No | No | No |
 | **Cell formatting** | Yes (auto) | No | No | No | No |
+| **Table properties** | Yes | No | No | No | No |
+| **DDL operations** | Yes (5 ops) | No | No | No | No |
+| **Data diff** | Yes (PK-matched) | No | No | No | No |
 | **File-as-table** | Yes (DuckDB) | No | No | No | No |
 | **Transactions** | Yes (atomic) | No | No | No | No |
 | **Multi-DB** | PG, SQLite, MySQL, DuckDB | PG only | Yes (Go) | Yes (dadbod) | 3 DBs |

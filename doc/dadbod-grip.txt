@@ -21,8 +21,9 @@ CONTENTS                                                    *grip-contents*
   12. Saved Queries ............ |grip-saved-queries|
   13. Connections .............. |grip-connections|
   14. Export ................... |grip-export|
-  15. Adapters ................. |grip-adapters|
-  16. Public API ............... |grip-api|
+  15. Schema Operations ........ |grip-ddl|
+  16. Adapters ................. |grip-adapters|
+  17. Public API ............... |grip-api|
 
 ==============================================================================
 1. INTRODUCTION                                          *grip-introduction*
@@ -256,6 +257,12 @@ COLUMN PINNING ~
   1 - 9           Pin/freeze N leftmost columns with thick separator
   0               Unpin all (or first column if none pinned)
 
+COLUMN VISIBILITY ~
+                                                  *grip-column-visibility*
+  -               Hide column under cursor
+  g-              Restore all hidden columns
+  gH              Column visibility picker (toggle individual columns)
+
 YANKING ~
                                                            *grip-yanking*
   y               Yank cell value to system clipboard
@@ -352,6 +359,8 @@ Schema browser keymaps:
   r               Refresh schema (re-fetch table list)
   gT              Open table picker
   gQ              Open query pad
+  D               Drop table (with typed confirmation)
+  +               Create new table (interactive designer)
   q / <Esc>       Close sidebar
 
 Columns show type abbreviations (int, text, bool, vc(255), etc.) and
@@ -421,7 +430,43 @@ Additional yank commands:
   gY ............... Yank entire table as CSV
 
 ==============================================================================
-15. ADAPTERS                                               *grip-adapters*
+15. SCHEMA OPERATIONS                                            *grip-ddl*
+
+Table properties ~
+Press `gI` in a grid or run `:GripProperties` to open a floating window
+showing full table metadata: columns with types, primary keys, foreign
+keys, indexes, estimated row count, and table size.
+
+Properties view keymaps:
+  R               Rename column under cursor
+  +               Add new column (prompts for name, type, default)
+  -               Drop column under cursor (typed confirmation)
+  gI              Refresh properties
+  q / <Esc>       Close
+
+Column rename ~
+Press `R` in the properties view or run `:GripRename old_name new_name`.
+Previews the ALTER TABLE DDL and asks for confirmation before executing.
+
+Column add/drop ~
+Press `+` in properties to add a column. Prompts for column name, data
+type, and optional default value. Previews the DDL before executing.
+Press `-` in properties to drop a column. Requires typing the column
+name to confirm (destructive operation).
+
+Create table ~
+Run `:GripCreate` or press `+` in the schema browser. Opens an
+interactive column designer that prompts for table name, then each
+column (name, type, primary key). Previews the CREATE TABLE DDL and
+asks for confirmation.
+
+Drop table ~
+Run `:GripDrop` or press `D` in the schema browser. Checks for foreign
+key dependents and offers CASCADE if they exist. Requires typing the
+table name to confirm.
+
+==============================================================================
+16. ADAPTERS                                              *grip-adapters*
 
 Grip supports four database adapters. The adapter is selected automatically
 based on the connection URL scheme.
@@ -432,14 +477,14 @@ based on the connection URL scheme.
   duckdb: .......... DuckDB via duckdb CLI
 
 Each adapter implements: query, execute, get_primary_keys, get_column_info,
-get_foreign_keys, list_tables, and explain.
+get_foreign_keys, get_indexes, get_table_stats, list_tables, and explain.
 
 File-as-table: `:Grip /path/to/data.parquet` routes through DuckDB to
 query Parquet, CSV, JSON, NDJSON, and XLSX files directly. No database
 connection is needed for file queries.
 
 ==============================================================================
-16. PUBLIC API                                                  *grip-api*
+17. PUBLIC API                                                  *grip-api*
 
                                                           *grip.setup()*
 grip.setup({opts})
