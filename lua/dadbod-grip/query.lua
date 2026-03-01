@@ -148,6 +148,14 @@ function M.filter_summary(spec)
   return #spec.filters .. " filters"
 end
 
+--- Replace all filters with a single clause (for loading presets).
+function M.set_filters(spec, clause)
+  local new = deep_copy(spec)
+  new.filters = { { clause = clause } }
+  new.page = 1
+  return new
+end
+
 --- Reset all modifiers: clear sorts, filters, page back to 1.
 function M.reset(spec)
   local new = deep_copy(spec)

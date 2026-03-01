@@ -1778,6 +1778,50 @@ function M._setup_keymaps(bufnr)
     vim.notify("Filters cleared", vim.log.levels.INFO)
   end, "Clear all filters")
 
+  -- gp: load a saved filter preset
+  map("gp", function()
+    local session_fp = M._sessions[bufnr]
+    if not session_fp or not session_fp.query_spec then return end
+    local tbl = session_fp.state.table_name
+    if not tbl then
+      vim.notify("Filter presets require a table context", vim.log.levels.INFO)
+      return
+    end
+    if not confirm_discard_changes("Load filter preset") then return end
+    local filters = require("dadbod-grip.filters")
+    filters.pick(tbl, function(preset)
+      local new_spec = qmod.set_filters(session_fp.query_spec, preset.clause)
+      if session_fp.on_requery then session_fp.on_requery(bufnr, new_spec) end
+      vim.notify("Filter: " .. preset.name, vim.log.levels.INFO)
+    end)
+  end, "Load filter preset")
+
+  -- gP: save current filter as preset
+  map("gP", function()
+    local session_fp = M._sessions[bufnr]
+    if not session_fp or not session_fp.query_spec then return end
+    local tbl = session_fp.state.table_name
+    if not tbl then
+      vim.notify("Filter presets require a table context", vim.log.levels.INFO)
+      return
+    end
+    if not qmod.has_filters(session_fp.query_spec) then
+      vim.notify("No active filters to save", vim.log.levels.INFO)
+      return
+    end
+    -- Combine all active filters into one clause
+    local clauses = {}
+    for _, f in ipairs(session_fp.query_spec.filters) do
+      table.insert(clauses, "(" .. f.clause .. ")")
+    end
+    local combined = table.concat(clauses, " AND ")
+    vim.ui.input({ prompt = "Save filter as: " }, function(name)
+      if not name or name == "" then return end
+      local filters = require("dadbod-grip.filters")
+      filters.save(tbl, name, combined)
+    end)
+  end, "Save filter as preset")
+
   -- ]p: next page
   map("]p", function()
     local session_p = M._sessions[bufnr]
@@ -2087,7 +2131,7 @@ function M._setup_keymaps(bufnr)
     local st_e = session_e.state
     local r_e = session_e._render
 
-    local formats = { "CSV", "TSV", "JSON", "SQL INSERT", "Markdown" }
+    local formats = { "CSV", "TSV", "JSON", "SQL INSERT", "Markdown", "Grip Table" }
     vim.ui.select(formats, { prompt = "Export format:" }, function(choice)
       if not choice then return end
 
@@ -2162,6 +2206,62 @@ function M._setup_keymaps(bufnr)
           end
           table.insert(lines_out, "| " .. table.concat(parts, " | ") .. " |")
         end
+        output = table.concat(lines_out, "\n")
+      elseif choice == "Grip Table" then
+        -- Box-drawing table matching the grid style
+        local widths = {}
+        for ci, col in ipairs(cols) do
+          widths[ci] = vim.fn.strdisplaywidth(col)
+        end
+        for _, row in ipairs(rows_data) do
+          for ci, v in ipairs(row) do
+            widths[ci] = math.max(widths[ci], vim.fn.strdisplaywidth(v or "NULL"))
+          end
+        end
+        -- Top border: ╔════╤════╗
+        local top_parts = {}
+        for ci = 1, #cols do
+          table.insert(top_parts, string.rep("═", widths[ci] + 2))
+        end
+        local top = "╔" .. table.concat(top_parts, "╤") .. "╗"
+        -- Header: ║ col │ col ║
+        local hdr_parts = {}
+        for ci, col in ipairs(cols) do
+          local pad = widths[ci] - vim.fn.strdisplaywidth(col)
+          table.insert(hdr_parts, " " .. col .. string.rep(" ", pad) .. " ")
+        end
+        local hdr = "║" .. table.concat(hdr_parts, "│") .. "║"
+        -- Separator: ╠════╪════╣
+        local sep_parts = {}
+        for ci = 1, #cols do
+          table.insert(sep_parts, string.rep("═", widths[ci] + 2))
+        end
+        local separator = "╠" .. table.concat(sep_parts, "╪") .. "╣"
+        -- Data rows: ║ val │ val ║
+        local data_lines = {}
+        for _, row in ipairs(rows_data) do
+          local row_parts = {}
+          for ci, v in ipairs(row) do
+            local display = v or "NULL"
+            local pad = widths[ci] - vim.fn.strdisplaywidth(display)
+            -- Right-align numbers
+            if v and tonumber(v) then
+              table.insert(row_parts, " " .. string.rep(" ", pad) .. display .. " ")
+            else
+              table.insert(row_parts, " " .. display .. string.rep(" ", pad) .. " ")
+            end
+          end
+          table.insert(data_lines, "║" .. table.concat(row_parts, "│") .. "║")
+        end
+        -- Bottom border: ╚════╧════╝
+        local bot_parts = {}
+        for ci = 1, #cols do
+          table.insert(bot_parts, string.rep("═", widths[ci] + 2))
+        end
+        local bot = "╚" .. table.concat(bot_parts, "╧") .. "╝"
+        local lines_out = { top, hdr, separator }
+        for _, dl in ipairs(data_lines) do table.insert(lines_out, dl) end
+        table.insert(lines_out, bot)
         output = table.concat(lines_out, "\n")
       end
 

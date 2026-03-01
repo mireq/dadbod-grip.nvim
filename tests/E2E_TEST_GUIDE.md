@@ -70,19 +70,20 @@ All seeds create the same 13 tables + 1 view:
 ## 2. Unit Tests
 
 ```bash
-just test                       # run all 197 specs
+just test                       # run all 240 specs
 ```
 
-Expected: `RESULT: ALL TESTS PASSED` with 8 spec files:
+Expected: `RESULT: ALL TESTS PASSED` with 9 spec files:
 
 | Spec | Tests | What it covers |
 |------|-------|----------------|
-| adapter_spec | 29 | URL parsing, affected-row patterns, PRAGMA quoting |
+| adapter_spec | 33 | URL parsing, affected-row patterns, PRAGMA quoting, httpfs |
 | csv_parser_spec | 15 | RFC 4180 parsing, multiline, escaping |
 | data_spec | 33 | Immutable state transforms, undo, staging |
 | ddl_spec | 18 | DDL SQL generation, module scoping |
-| init_spec | 22 | Query routing, file-as-table detection |
-| query_spec | 37 | Query composition, sort/filter/pagination |
+| filters_spec | 20 | Filter preset CRUD, edge cases, isolation |
+| init_spec | 36 | Query routing, file-as-table detection, URL detection |
+| query_spec | 42 | Query composition, sort/filter/pagination, set_filters |
 | sql_spec | 19 | SQL quoting, UPDATE/INSERT/DELETE generation |
 | view_spec | 24 | Cell classification, conditional formatting |
 
@@ -356,9 +357,76 @@ Run each adapter through the core flow: open table, edit, apply, verify.
 - [ ] Title shows `[read-only]`
 - [ ] Supported extensions: .parquet, .csv, .tsv, .json, .ndjson, .jsonl, .xlsx
 
+### DuckDB Remote File (httpfs)
+
+Requires `duckdb` CLI and internet access.
+
+```bash
+just seed-httpfs                           # seed connection + saved queries
+just dev-httpfs                            # launch with DuckDB memory connection
+```
+
+Direct URL querying:
+```
+:Grip https://blobs.duckdb.org/data/penguins.csv
+```
+- [ ] Grid opens with penguin data (344 rows)
+- [ ] Title shows `[read-only: no PK]`
+- [ ] Sort, filter, pagination work on remote data
+
+Saved query loading:
+```
+:GripLoad
+```
+- [ ] Picker shows 7 demo queries (penguins, titanic, stocks, prices, cars, iris, todos)
+- [ ] Selecting one runs the query and shows results in grid
+
+Demo URLs by format:
+
+| Dataset | Format | Rows | URL |
+|---------|--------|------|-----|
+| Penguins | CSV | 344 | `https://blobs.duckdb.org/data/penguins.csv` |
+| Titanic | CSV | 891 | `https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv` |
+| Stocks | CSV | 560 | `https://vega.github.io/vega-datasets/data/stocks.csv` |
+| Prices | Parquet | -- | `https://duckdb.org/data/prices.parquet` |
+| Cars | JSON | 406 | `https://vega.github.io/vega-datasets/data/cars.json` |
+| Iris | Parquet | 150 | `https://huggingface.co/api/datasets/scikit-learn/iris/parquet/default/train/0.parquet` |
+| TODOs | JSON | 200 | `https://duckdb.org/data/json/todos.json` |
+
+- [ ] CSV URL opens correctly
+- [ ] Parquet URL opens correctly (httpfs range requests)
+- [ ] JSON URL opens correctly
+- [ ] URL with query string works: `https://example.com/data.csv?v=1`
+
 ---
 
-## 13. Edge Cases
+## 13. Filter Presets Checklist
+
+- [ ] `:Grip users` then `f` on a cell to add a quick filter
+- [ ] `gP` prompts for preset name, saves current filter
+- [ ] `F` clears filters, then `gp` opens preset picker
+- [ ] Selecting a preset applies the filter (status line shows it)
+- [ ] `gP` again with different filter, same name -- overwrites
+- [ ] Presets persist in `.grip/filters.json`
+- [ ] Presets are per-table (users presets do not appear for orders)
+- [ ] `gp` on a read-only view (no table context) shows info message
+- [ ] `gP` with no active filters shows info message
+
+---
+
+## 14. Export Formats Checklist
+
+- [ ] `gE` shows 6 formats: CSV, TSV, JSON, SQL INSERT, Markdown, Grip Table
+- [ ] CSV export: proper RFC 4180 escaping
+- [ ] Markdown export: GFM pipe table, renders in GitHub
+- [ ] Grip Table export: box-drawing borders matching grid style
+- [ ] Grip Table: numbers right-aligned, text left-aligned
+- [ ] Grip Table: NULL shows as "NULL"
+- [ ] Grip Table: column widths auto-fit to content
+
+---
+
+## 15. Edge Cases
 
 - [ ] `:Grip empty_table` shows "(empty result)" centered
 - [ ] `:Grip unicode_fun` renders multibyte chars correctly
@@ -373,7 +441,7 @@ Run each adapter through the core flow: open table, edit, apply, verify.
 
 ---
 
-## 14. Regression Checks (from v2 audit)
+## 16. Regression Checks (from v2 audit)
 
 These are specific bugs found and fixed. Verify they stay fixed.
 

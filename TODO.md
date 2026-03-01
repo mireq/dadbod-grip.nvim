@@ -31,8 +31,12 @@ query pad (gQ), saved queries, connection profiles, data diff (gD).
 Table properties (gI), column rename (R), column add/drop (+/x), drop table,
 create table.
 
+### v2.2.0 - Quality of Life
+Remote file querying via DuckDB httpfs, saved filter presets (gp/gP),
+Grip Table box-drawing export format, Telescope saved queries picker.
+
 ### Ongoing
-- 197 unit tests across 8 spec files
+- 240 unit tests across 9 spec files
 - Structural sharing in data.lua, sampled column widths
 - Vimdoc help file (doc/dadbod-grip.txt)
 
@@ -44,9 +48,7 @@ Unimplemented ideas from prior research and specs. Not committed to any
 release. Roughly ordered by expected impact.
 
 ### High Value
-- [ ] Remote file querying via DuckDB httpfs: `:Grip https://example.com/data.csv`
 - [ ] Generate sync SQL from diff (make table A match table B)
-- [ ] Saved filter presets per table (named WHERE clauses)
 - [ ] Compact diff mode for narrow terminals (<120 cols)
 
 ### Exploration

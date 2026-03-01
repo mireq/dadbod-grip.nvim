@@ -29,17 +29,27 @@ local function extract_path(url)
   return path
 end
 
+local HTTP_TIMEOUT = 30000
+
 local function duckdb(db_path, sql_str, timeout_ms)
+  -- Auto-load httpfs extension for HTTP URLs
+  local effective_sql = sql_str
+  local effective_timeout = timeout_ms or DEFAULT_TIMEOUT
+  if sql_str:find("https?://") then
+    effective_sql = "INSTALL httpfs; LOAD httpfs;\n" .. sql_str
+    effective_timeout = math.max(effective_timeout, HTTP_TIMEOUT)
+  end
+
   local args = { "duckdb", "-csv", "-header" }
   if db_path ~= ":memory:" then
     args[#args + 1] = db_path
   end
   args[#args + 1] = "-c"
-  args[#args + 1] = sql_str
+  args[#args + 1] = effective_sql
 
   local result = vim.system(
     args,
-    { text = true, timeout = timeout_ms or DEFAULT_TIMEOUT }
+    { text = true, timeout = effective_timeout }
   ):wait()
   return result.stdout or "", result.stderr or "", result.code
 end

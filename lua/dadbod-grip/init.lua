@@ -32,14 +32,18 @@ local DUCKDB_EXTENSIONS = {
   ".parquet", ".csv", ".tsv", ".json", ".ndjson", ".jsonl", ".xlsx",
 }
 
---- Detect if arg is a queryable file path for DuckDB file-as-table.
+--- Detect if arg is a queryable file path or URL for DuckDB file-as-table.
 local function is_queryable_file(arg)
-  if not (arg:match("^/") or arg:match("^~/") or arg:match("^%./") or arg:match("^%.%./")) then
+  local is_path = arg:match("^/") or arg:match("^~/") or arg:match("^%./") or arg:match("^%.%./")
+  local is_url = arg:match("^https?://")
+  if not is_path and not is_url then
     return false
   end
   local lower = arg:lower()
+  -- Strip query string and fragment for URL extension matching
+  local check = is_url and lower:gsub("[?#].*$", "") or lower
   for _, ext in ipairs(DUCKDB_EXTENSIONS) do
-    if lower:sub(-#ext) == ext then return true end
+    if check:sub(-#ext) == ext then return true end
   end
   return false
 end
@@ -54,8 +58,13 @@ local function resolve_query(arg, page_size)
     return nil, "No table name or query provided."
   end
 
-  -- File-as-table: route to DuckDB
+  -- File-as-table or URL-as-table: route to DuckDB
   if is_queryable_file(arg) then
+    if arg:match("^https?://") then
+      -- Remote URL: pass through to DuckDB httpfs
+      local file_sql = string.format("SELECT * FROM '%s'", arg:gsub("'", "''"))
+      return query.new_raw(file_sql, page_size), nil, arg
+    end
     local path = arg
     if path:sub(1, 1) == "~" then
       path = (os.getenv("HOME") or "") .. path:sub(2)

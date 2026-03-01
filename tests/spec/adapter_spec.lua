@@ -293,6 +293,54 @@ test("sqlite get_primary_keys: embedded quote is escaped", function()
   end)
 end)
 
+-- ── DuckDB httpfs extension loading ─────────────────────────────────────────
+
+test("duckdb query: SQL with HTTP URL prepends INSTALL/LOAD httpfs", function()
+  with_executable(function()
+    local args = capture_system_args("col\nval\n", function()
+      duckdb.query("SELECT * FROM 'https://example.com/data.csv'", "duckdb::memory:")
+    end)
+    local sql_arg = args[#args]
+    contains(sql_arg, "INSTALL httpfs", "should prepend INSTALL httpfs")
+    contains(sql_arg, "LOAD httpfs", "should prepend LOAD httpfs")
+    contains(sql_arg, "https://example.com/data.csv", "original SQL preserved")
+  end)
+end)
+
+test("duckdb query: SQL without HTTP URL does not prepend httpfs", function()
+  with_executable(function()
+    local args = capture_system_args("col\nval\n", function()
+      duckdb.query("SELECT * FROM users", "duckdb::memory:")
+    end)
+    local sql_arg = args[#args]
+    assert(not sql_arg:find("httpfs", 1, true), "should not contain httpfs: " .. sql_arg)
+  end)
+end)
+
+test("duckdb query: httpfs timeout is at least 30 seconds", function()
+  with_executable(function()
+    local captured_opts
+    local orig = vim.system
+    vim.system = function(a, opts)
+      captured_opts = opts
+      return { wait = function() return { stdout = "col\nval\n", stderr = "", code = 0 } end }
+    end
+    duckdb.query("SELECT * FROM 'https://example.com/data.csv'", "duckdb::memory:")
+    vim.system = orig
+    assert(captured_opts.timeout >= 30000, "timeout should be >= 30000, got " .. tostring(captured_opts.timeout))
+  end)
+end)
+
+test("duckdb query: http URL also triggers httpfs", function()
+  with_executable(function()
+    local args = capture_system_args("col\nval\n", function()
+      duckdb.query("SELECT * FROM 'http://example.com/data.csv'", "duckdb::memory:")
+    end)
+    local sql_arg = args[#args]
+    contains(sql_arg, "INSTALL httpfs", "http should also trigger httpfs")
+  end)
+end)
+
 -- ── summary ──────────────────────────────────────────────────────────────────
 
 print(string.format("\nadapter_spec: %d passed, %d failed", pass, fail))

@@ -247,6 +247,47 @@ test("page_info: with total", function()
   contains(info, "250 rows")
 end)
 
+-- ── set_filters (for filter presets) ─────────────────────────────────────────
+
+test("set_filters: replaces all existing filters with single clause", function()
+  local spec = query.new_table("users", 100)
+  spec = query.add_filter(spec, "a = 1")
+  spec = query.add_filter(spec, "b = 2")
+  local spec2 = query.set_filters(spec, "status = 'active'")
+  eq(#spec2.filters, 1, "should have exactly 1 filter")
+  eq(spec2.filters[1].clause, "status = 'active'", "clause")
+end)
+
+test("set_filters: resets page to 1", function()
+  local spec = query.new_table("users", 100)
+  spec = query.set_page(spec, 5)
+  local spec2 = query.set_filters(spec, "x > 10")
+  eq(spec2.page, 1, "page should be 1")
+end)
+
+test("set_filters: does not mutate original", function()
+  local spec = query.new_table("users", 100)
+  spec = query.add_filter(spec, "old = true")
+  local _ = query.set_filters(spec, "new = true")
+  eq(#spec.filters, 1, "original should still have 1 filter")
+  eq(spec.filters[1].clause, "old = true", "original clause unchanged")
+end)
+
+test("set_filters: compound clause preserved verbatim", function()
+  local spec = query.new_table("users", 100)
+  local clause = "(age > 18) AND (status = 'active')"
+  local spec2 = query.set_filters(spec, clause)
+  eq(spec2.filters[1].clause, clause, "compound clause preserved")
+end)
+
+test("set_filters: SQL builds correctly with preset filter", function()
+  local spec = query.new_table("orders", 100)
+  local spec2 = query.set_filters(spec, "total > 1000")
+  local sql = query.build_sql(spec2)
+  contains(sql, "WHERE (total > 1000)", "WHERE clause")
+  contains(sql, '"orders"', "table name")
+end)
+
 -- ── reset ───────────────────────────────────────────────────────────────────
 
 test("reset: clears sorts, filters, resets page", function()

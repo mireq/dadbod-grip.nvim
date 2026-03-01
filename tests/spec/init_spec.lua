@@ -157,6 +157,81 @@ test("resolve_query: file path with single quote is escaped", function()
   contains(built_sql, "it''s", "single quote should be escaped")
 end)
 
+-- ── is_queryable_file: URL detection ────────────────────────────────────────
+
+test("is_queryable_file: https URL with .csv", function()
+  eq(grip._is_queryable_file("https://example.com/data.csv"), true)
+end)
+
+test("is_queryable_file: http URL with .parquet", function()
+  eq(grip._is_queryable_file("http://example.com/data.parquet"), true)
+end)
+
+test("is_queryable_file: https URL with .json", function()
+  eq(grip._is_queryable_file("https://example.com/data.json"), true)
+end)
+
+test("is_queryable_file: https URL with .ndjson", function()
+  eq(grip._is_queryable_file("https://example.com/data.ndjson"), true)
+end)
+
+test("is_queryable_file: https URL with .xlsx", function()
+  eq(grip._is_queryable_file("https://example.com/data.xlsx"), true)
+end)
+
+test("is_queryable_file: https URL with unsupported extension", function()
+  eq(grip._is_queryable_file("https://example.com/page.html"), false)
+end)
+
+test("is_queryable_file: URL with query string stripped for extension check", function()
+  eq(grip._is_queryable_file("https://example.com/data.csv?token=abc"), true)
+end)
+
+test("is_queryable_file: URL with fragment stripped for extension check", function()
+  eq(grip._is_queryable_file("https://example.com/data.parquet#row=5"), true)
+end)
+
+test("is_queryable_file: URL case insensitive", function()
+  eq(grip._is_queryable_file("https://example.com/DATA.CSV"), true)
+end)
+
+test("is_queryable_file: bare https not a file", function()
+  eq(grip._is_queryable_file("https://example.com/"), false)
+end)
+
+-- ── resolve_query: URL-as-table ─────────────────────────────────────────────
+
+test("resolve_query: https URL returns raw spec with URL as file_path", function()
+  local spec, tbl, fpath = grip._resolve_query("https://example.com/data.csv", 50)
+  assert(spec, "spec should not be nil")
+  eq(tbl, nil, "table_name should be nil for URL queries")
+  eq(fpath, "https://example.com/data.csv", "file_path should be the URL")
+end)
+
+test("resolve_query: URL SQL contains the URL in FROM clause", function()
+  local spec = grip._resolve_query("https://example.com/data.parquet", 50)
+  assert(spec, "spec should not be nil")
+  local built_sql = require("dadbod-grip.query").build_sql(spec)
+  contains(built_sql, "https://example.com/data.parquet", "SQL should contain the URL")
+end)
+
+test("resolve_query: URL with single quote is escaped", function()
+  local spec = grip._resolve_query("https://example.com/it's.csv", 50)
+  assert(spec, "spec should not be nil")
+  local built_sql = require("dadbod-grip.query").build_sql(spec)
+  contains(built_sql, "it''s", "single quote should be escaped")
+end)
+
+test("resolve_query: URL does not call filereadable", function()
+  local called = false
+  local orig = vim.fn.filereadable
+  vim.fn.filereadable = function() called = true; return 0 end
+  local spec = grip._resolve_query("https://example.com/data.csv", 50)
+  vim.fn.filereadable = orig
+  assert(spec, "spec should not be nil")
+  eq(called, false, "filereadable should not be called for URLs")
+end)
+
 -- ── summary ──────────────────────────────────────────────────────────────────
 
 print(string.format("\ninit_spec: %d passed, %d failed", pass, fail))
