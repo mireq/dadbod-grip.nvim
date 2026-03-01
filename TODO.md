@@ -27,47 +27,62 @@
 - [x] Multiline cell display (↵ indicator)
 - [x] SQLite test fixtures (seed_sqlite.sql — mirrors PG seed)
 - [ ] DuckDB adapter (duckdb CLI, information_schema, parquet/csv queries)
+  - [ ] File-as-table querying: `:Grip /path/to/data.parquet` (CSV, JSON, Parquet, Excel via DuckDB)
 - [ ] MySQL/MariaDB adapter (mysql CLI, information_schema)
 
-## v1.2.0 — Edit Mode Improvements
+## v1.2.0 — Sort, Filter, Paginate
 
-- [ ] Consistent shortcut scheme across all edit operations
-- [ ] Bulk edit (visual select multiple cells)
+Low complexity, high impact. Every desktop GUI has these; no Neovim plugin does.
+
+- [ ] Sort by column — `s` toggles ASC/DESC/off, re-runs query with ORDER BY
+- [ ] Stacked sort — `S` adds secondary sort column
+- [ ] Filter rows — `f` opens WHERE clause input, appends to base query
+- [ ] Quick filter — `ff` on a cell to filter by "column = this value"
+- [ ] Clear filter — `F` removes filter and refreshes
+- [ ] Pagination — `]p`/`[p` next/prev page, status line shows "Page 1 of N"
+- [ ] Search within grid — `/` to search loaded buffer text locally
+
+## v1.3.0 — Foreign Key Navigation & Data Intelligence
+
+The single biggest gap in the Neovim database ecosystem. DataGrip, DBeaver, Postico, TablePlus all have FK navigation.
+
+- [ ] FK navigation — `gf` on a FK cell opens referenced row in new grid
+- [ ] FK metadata query per adapter (information_schema / PRAGMA foreign_key_list)
+- [ ] Navigation stack with `<C-o>` to go back, breadcrumb in status line
+- [ ] Aggregate on selection — visual select cells, show count/sum/avg/min/max
+- [ ] Column statistics — `gS` on a column for count, distinct, nulls, min/max, top values (validated by MotherDuck's Column Explorer)
+- [ ] Additional export formats — JSON, SQL INSERT, Markdown table (gE picker)
+
+## v1.4.0 — Grid Enhancements
+
+- [ ] Column pinning/freezing — number keys (1-9) to freeze N leftmost columns (pspg-style)
+- [ ] Column resize / auto-fit
+- [ ] Column hide/show toggle
+- [ ] Conditional cell formatting — negatives red, booleans colored, dates dimmed if past
+- [ ] Batch edit — visual block select, set all selected cells to same value
 - [ ] Copy/paste between cells
 - [ ] Undo history (multi-level, not just per-row)
-- [ ] SQL template generation from table context (INSERT/SELECT/UPDATE/DELETE)
-
-## v1.3.0 — Table Navigation
-
-- [ ] Column resize / auto-fit
-- [ ] Sort by column (toggle asc/desc)
-- [ ] Filter rows (WHERE clause builder)
-- [ ] Pagination for large tables (next/prev page)
-- [ ] Jump to row by PK value
-- [ ] Search within grid (/ to filter visible rows)
 
 ## v2.0.0 — Advanced Features
 
-- [ ] Foreign key navigation (follow FK to related table)
+- [ ] EXPLAIN plan viewer — `:GripExplain` renders query plan as color-coded tree
+- [ ] Data diff — `:GripDiff` opens two grids side-by-side with diff highlighting
+- [ ] Transaction wrapper — BEGIN/COMMIT/ROLLBACK around staged changes
 - [ ] Telescope/fzf picker for tables and columns
 - [ ] Schema browser (tree view of tables/views/indexes)
-- [ ] Transaction support (BEGIN/COMMIT/ROLLBACK wrapper)
-- [ ] Diff view (compare staged changes side-by-side)
+- [ ] Saved filters/queries per table (`:GripSave`/`:GripLoad`)
 - [ ] Connection profiles (project-level saved connections)
 
 ## Future — Schema Operations (DDL)
 
 - [ ] Table properties view (columns, types, constraints, defaults)
 - [ ] Column rename (ALTER TABLE ... RENAME COLUMN)
-- [ ] Column add (ALTER TABLE ... ADD COLUMN with type/nullable/default)
-- [ ] Column drop (ALTER TABLE ... DROP COLUMN with confirmation)
-- [ ] Edit column properties (type, nullable, default) — adapter-aware DDL
-- [ ] Create table wizard (interactive column definition)
-- [ ] Drop table with confirmation
+- [ ] Column add/drop with type/nullable/default
+- [ ] Edit column properties — adapter-aware DDL generation
+- [ ] Create/drop table with confirmation
 
 ## Ongoing
 
 - [ ] Automated tests and CI (GitHub Actions)
 - [ ] Performance profiling on large tables (1000+ rows)
 - [ ] Documentation (vimdoc help file)
-- [ ] Update README comparison table for multi-DB support
