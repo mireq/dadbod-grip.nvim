@@ -19,6 +19,14 @@ local OPTS = {
 
 -- ── helpers ───────────────────────────────────────────────────────────────
 
+--- Re-render a grip buffer if it's still valid and has a session.
+function M._render_if_visible(bufnr)
+  local s = view._sessions[bufnr]
+  if s and vim.api.nvim_buf_is_valid(bufnr) then
+    view.render(bufnr, s.state)
+  end
+end
+
 -- File extensions DuckDB can query directly (file-as-table).
 local DUCKDB_EXTENSIONS = {
   ".parquet", ".csv", ".tsv", ".json", ".ndjson", ".jsonl", ".xlsx",
@@ -251,6 +259,19 @@ function M.open(arg, url, opts)
     local count_result = db.query(count_sql, conn)
     if count_result and count_result.rows[1] then
       session.total_rows = tonumber(count_result.rows[1][1]) or 0
+    end
+    -- Auto-fetch column info for conditional formatting
+    if table_name_arg and not session._column_info then
+      vim.schedule(function()
+        local s = view._sessions[bufnr]
+        if s and not s._column_info then
+          local info = db.get_column_info(table_name_arg, conn)
+          if info then
+            s._column_info = info
+            M._render_if_visible(bufnr)
+          end
+        end
+      end)
     end
   end
 

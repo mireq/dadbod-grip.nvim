@@ -40,7 +40,12 @@ local function ensure_highlights()
     GripBorder   = "bold",
     GripStatusOk = "bold",
     GripStatusChg = "bold",
-    GripFreeze   = "bold",
+    GripFreeze    = "bold",
+    GripNegative  = "bold",
+    GripBoolTrue  = "bold",
+    GripBoolFalse = "bold",
+    GripDatePast  = "italic",
+    GripUrl       = "underline",
   }
   for name, _ in pairs(groups) do
     if vim.fn.hlID(name) == 0 then
@@ -52,7 +57,12 @@ local function ensure_highlights()
       if name == "GripReadonly" then vim.cmd("hi GripReadonly gui=italic ctermfg=243 guifg=#6c7086") end
       if name == "GripBorder"   then vim.cmd("hi GripBorder gui=bold ctermfg=147 guifg=#cba6f7") end
       if name == "GripStatusChg" then vim.cmd("hi GripStatusChg gui=bold ctermfg=229 guifg=#f9e2af") end
-      if name == "GripFreeze"   then vim.cmd("hi GripFreeze gui=bold ctermfg=147 guifg=#f5c2e7") end
+      if name == "GripFreeze"    then vim.cmd("hi GripFreeze gui=bold ctermfg=147 guifg=#f5c2e7") end
+      if name == "GripNegative"  then vim.cmd("hi GripNegative gui=bold ctermfg=203 guifg=#f38ba8") end
+      if name == "GripBoolTrue"  then vim.cmd("hi GripBoolTrue gui=bold ctermfg=113 guifg=#a6e3a1") end
+      if name == "GripBoolFalse" then vim.cmd("hi GripBoolFalse gui=bold ctermfg=203 guifg=#f38ba8") end
+      if name == "GripDatePast"  then vim.cmd("hi GripDatePast gui=italic ctermfg=243 guifg=#6c7086") end
+      if name == "GripUrl"       then vim.cmd("hi GripUrl gui=underline ctermfg=117 guifg=#89b4fa") end
     end
   end
 end
@@ -97,6 +107,53 @@ local function format_cell(value, width, is_null_staged)
     dw = width
   end
   return display .. string.rep(" ", width - dw), hl
+end
+
+--- Classify a cell value for conditional formatting.
+--- Returns hl_group string or nil. Only for clean, non-null cells.
+local function classify_cell(value, data_type)
+  if value == nil or value == "" then return nil end
+  local val_lower = value:lower()
+
+  -- Boolean detection
+  if data_type then
+    local dt = data_type:lower()
+    if dt:match("bool") or dt:match("tinyint%(1%)") then
+      if val_lower == "t" or val_lower == "true" or val_lower == "1" or val_lower == "yes" then
+        return "GripBoolTrue"
+      elseif val_lower == "f" or val_lower == "false" or val_lower == "0" or val_lower == "no" then
+        return "GripBoolFalse"
+      end
+    end
+  end
+  -- Detect explicit true/false without type info
+  if val_lower == "true" or val_lower == "t" then return "GripBoolTrue" end
+  if val_lower == "false" or val_lower == "f" then return "GripBoolFalse" end
+
+  -- Negative numbers
+  local num = tonumber(value)
+  if num and num < 0 then return "GripNegative" end
+
+  -- URLs and emails
+  if value:match("^https?://") or value:match("^[%w%.%-]+@[%w%.%-]+%.[%w]+$") then
+    return "GripUrl"
+  end
+
+  -- Dates in the past (requires data_type)
+  if data_type then
+    local dt = data_type:lower()
+    if dt:match("date") or dt:match("timestamp") then
+      local y, m, d = value:match("^(%d%d%d%d)-(%d%d)-(%d%d)")
+      if y then
+        local date_str = string.format("%04d-%02d-%02d", tonumber(y), tonumber(m), tonumber(d))
+        if date_str < os.date("%Y-%m-%d") then
+          return "GripDatePast"
+        end
+      end
+    end
+  end
+
+  return nil
 end
 
 -- ── border line builders ──────────────────────────────────────────────────
@@ -157,6 +214,14 @@ local function build_render(session, opts)
   local ordered = data.get_ordered_rows(st)
   local pin = session.pinned_count or 0
   if pin >= #columns then pin = 0 end  -- can't pin all columns
+
+  -- Build data type map for conditional formatting
+  local cond_type_map = {}
+  if session._column_info then
+    for _, ci in ipairs(session._column_info) do
+      cond_type_map[ci.column_name] = ci.data_type
+    end
+  end
 
   -- Compute column widths across all rows including staged changes
   local display_rows = {}
@@ -322,6 +387,8 @@ local function build_render(session, opts)
             cell_hl = "GripModified"
           elseif eff == nil or eff == "" then
             cell_hl = "GripNull"
+          else
+            cell_hl = classify_cell(eff, cond_type_map[col])
           end
           if cell_hl then
             push_mark(li, bp.start, bp.finish + 1, cell_hl)
@@ -1928,6 +1995,8 @@ function M._setup_keymaps(bufnr)
         "  T         Toggle column type annotations",
         "",
         "  Colors: modified=blue  deleted=red  inserted=green",
+        "          negative=red  true=green  false=red",
+        "          past-date=dim  url=underline",
         "",
         " ───────────────────────────────────────────",
         "  dadbod-grip.nvim by Jory Pestorious",
