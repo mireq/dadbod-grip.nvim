@@ -161,4 +161,18 @@ function M.execute(sql, url)
   return adapter.execute(sql, conn)
 end
 
+function M.get_foreign_keys(table_name, url)
+  local adapter, conn, err = resolve(url)
+  if not adapter then return {}, err end
+  if not adapter.get_foreign_keys then return {}, "Adapter does not support FK lookup" end
+  return adapter.get_foreign_keys(table_name, conn)
+end
+
+function M.explain(sql_str, url)
+  local adapter, conn, err = resolve(url)
+  if not adapter then return nil, err end
+  if not adapter.explain then return nil, "Adapter does not support EXPLAIN" end
+  return adapter.explain(sql_str, conn)
+end
+
 return M

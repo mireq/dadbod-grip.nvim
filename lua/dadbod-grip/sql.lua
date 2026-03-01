@@ -23,11 +23,12 @@ function M.quote_value(v)
 end
 
 -- Quote a column or table identifier with double-quotes.
-local function quote_ident(name)
+function M.quote_ident(name)
   -- Escape any existing double-quotes
   local escaped = tostring(name):gsub('"', '""')
   return '"' .. escaped .. '"'
 end
+local quote_ident = M.quote_ident
 
 -- M.build_update(table_name, pk_values, changes) → string
 -- pk_values: { col = "val", ... }

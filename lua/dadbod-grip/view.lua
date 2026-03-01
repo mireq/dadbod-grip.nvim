@@ -1,9 +1,10 @@
 -- view.lua — buffer rendering + keymaps.
 -- One buffer per grip session. State in M._sessions[bufnr].
 
-local data = require("dadbod-grip.data")
-local sql  = require("dadbod-grip.sql")
-local db   = require("dadbod-grip.db")
+local data  = require("dadbod-grip.data")
+local sql   = require("dadbod-grip.sql")
+local db    = require("dadbod-grip.db")
+local qmod  = require("dadbod-grip.query")
 
 local M = {}
 M._sessions = {}  -- [bufnr] = { state, url, query_sql }
@@ -108,11 +109,25 @@ end
 -- Build the title bar with connection/table info and staged count.
 local function title_line(session, columns, widths, total_width)
   local staged = data.count_staged(session.state)
-  local right_info = staged > 0
-    and (" [" .. staged .. " staged] ")
-    or (session.state.readonly and " [read-only: no PK] " or " ")
+  local badges = {}
+  if staged > 0 then table.insert(badges, staged .. " staged") end
+  if session.state.readonly then table.insert(badges, "read-only: no PK") end
+  if session.query_spec and qmod.has_filters(session.query_spec) then
+    table.insert(badges, "filtered")
+  end
+  local right_info = #badges > 0 and (" [" .. table.concat(badges, " | ") .. "] ") or " "
 
-  local title = " " .. (session.state.table_name or "(query result)") .. " "
+  -- Build title with breadcrumb for FK navigation
+  local title_text = session.state.table_name or "(query result)"
+  if session.nav_stack and #session.nav_stack > 0 then
+    local crumbs = {}
+    for _, frame in ipairs(session.nav_stack) do
+      table.insert(crumbs, frame.table_name or "?")
+    end
+    table.insert(crumbs, title_text)
+    title_text = table.concat(crumbs, " > ")
+  end
+  local title = " " .. title_text .. " "
   -- Pad title line to fill width
   local inner = total_width - 3  -- ╔═(2) + ═╗(2) - 1 (gsub strips trailing space from right_info)
   local title_len = #title + #right_info
@@ -161,10 +176,13 @@ local function build_render(session, opts)
 
   -- ── Header row ──
   local hdr_parts = { "║ " }
+  local qspec = session.query_spec
   for i, col in ipairs(columns) do
     local is_ro = st.readonly
     local prefix = is_ro and "~" or ""
-    local label = prefix .. col
+    local sort_ind = qspec and qmod.get_sort_indicator(qspec, col) or nil
+    local suffix = sort_ind and " " .. sort_ind or ""
+    local label = prefix .. col .. suffix
     local w = widths[col]
     local lw = vim.fn.strdisplaywidth(label)
     if lw > w then
@@ -296,17 +314,26 @@ local function build_render(session, opts)
   push_mark(#lines, 0, #bot_line, "GripBorder")
 
   -- ── Status line ──
-  local total_rows = #st.rows
   local staged_count = data.count_staged(st)
-  local sql_preview = (st.sql or ""):sub(1, 60)
   local status_parts = {}
-  if staged_count > 0 then
-    table.insert(status_parts, staged_count .. " staged")
+
+  -- Row/page info
+  if session.query_spec and session.total_rows then
+    table.insert(status_parts, qmod.page_info(session.query_spec, session.total_rows))
+  else
+    table.insert(status_parts, #st.rows .. " rows")
   end
-  if st.readonly then table.insert(status_parts, "read-only: no PK") end
-  local status_str = " " .. total_rows .. " rows"
-  if #status_parts > 0 then status_str = status_str .. "  │  " .. table.concat(status_parts, ", ") end
-  status_str = status_str .. "  │  " .. sql_preview
+
+  if staged_count > 0 then table.insert(status_parts, staged_count .. " staged") end
+  if st.readonly then table.insert(status_parts, "read-only") end
+
+  -- Filter summary
+  if session.query_spec then
+    local fs = qmod.filter_summary(session.query_spec)
+    if fs ~= "" then table.insert(status_parts, fs) end
+  end
+
+  local status_str = " " .. table.concat(status_parts, "  │  ")
   table.insert(lines, status_str)
 
   -- ── Hint line ──
@@ -1249,6 +1276,437 @@ function M._setup_keymaps(bufnr)
     M.render(bufnr, session.state)
   end, "Toggle column types")
 
+  -- ── sort / filter / pagination keymaps ──────────────────────────────────
+
+  -- Helper: warn if pending changes, return true if user wants to proceed
+  local function confirm_discard_changes(action_name)
+    local session_c = M._sessions[bufnr]
+    if not session_c then return true end
+    if not data.has_changes(session_c.state) then return true end
+    local staged = data.count_staged(session_c.state)
+    local choice = vim.fn.confirm(
+      string.format("%s will discard %d unapplied change(s). Continue?", action_name, staged),
+      "&Yes\n&Cancel", 2
+    )
+    return choice == 1
+  end
+
+  -- s: sort by column (replaces existing sort)
+  map("s", function()
+    local session_s = M._sessions[bufnr]
+    if not session_s or not session_s.query_spec then return end
+    local cell = M.get_cell(bufnr)
+    if not cell then
+      vim.notify("Move cursor to a column to sort", vim.log.levels.INFO)
+      return
+    end
+    if not confirm_discard_changes("Sort") then return end
+    local new_spec = qmod.toggle_sort(session_s.query_spec, cell.col_name)
+    if session_s.on_requery then session_s.on_requery(bufnr, new_spec) end
+  end, "Sort by column")
+
+  -- S: add/toggle secondary sort (stacked)
+  map("S", function()
+    local session_s = M._sessions[bufnr]
+    if not session_s or not session_s.query_spec then return end
+    local cell = M.get_cell(bufnr)
+    if not cell then
+      vim.notify("Move cursor to a column to sort", vim.log.levels.INFO)
+      return
+    end
+    if not confirm_discard_changes("Sort") then return end
+    local new_spec = qmod.add_sort(session_s.query_spec, cell.col_name)
+    if session_s.on_requery then session_s.on_requery(bufnr, new_spec) end
+  end, "Add secondary sort")
+
+  -- f: quick filter by cell value
+  map("f", function()
+    local session_f = M._sessions[bufnr]
+    if not session_f or not session_f.query_spec then return end
+    local cell = M.get_cell(bufnr)
+    if not cell then
+      vim.notify("Move cursor to a cell to filter", vim.log.levels.INFO)
+      return
+    end
+    if not confirm_discard_changes("Filter") then return end
+    local new_spec = qmod.quick_filter(session_f.query_spec, cell.col_name, cell.value)
+    if session_f.on_requery then session_f.on_requery(bufnr, new_spec) end
+    local display = cell.value and (cell.col_name .. " = " .. tostring(cell.value):sub(1, 30)) or (cell.col_name .. " IS NULL")
+    vim.notify("Filtered: " .. display, vim.log.levels.INFO)
+  end, "Quick filter by cell value")
+
+  -- <C-f>: freeform WHERE clause filter
+  map("<C-f>", function()
+    local session_f = M._sessions[bufnr]
+    if not session_f or not session_f.query_spec then return end
+    if not confirm_discard_changes("Filter") then return end
+    vim.ui.input({ prompt = "WHERE: " }, function(input)
+      if not input or input == "" then return end
+      local new_spec = qmod.add_filter(session_f.query_spec, input)
+      if session_f.on_requery then session_f.on_requery(bufnr, new_spec) end
+    end)
+  end, "Filter rows (WHERE clause)")
+
+  -- F: clear all filters
+  map("F", function()
+    local session_f = M._sessions[bufnr]
+    if not session_f or not session_f.query_spec then return end
+    if not qmod.has_filters(session_f.query_spec) then
+      vim.notify("No active filters", vim.log.levels.INFO)
+      return
+    end
+    if not confirm_discard_changes("Clear filters") then return end
+    local new_spec = qmod.clear_filters(session_f.query_spec)
+    if session_f.on_requery then session_f.on_requery(bufnr, new_spec) end
+    vim.notify("Filters cleared", vim.log.levels.INFO)
+  end, "Clear all filters")
+
+  -- ]p: next page
+  map("]p", function()
+    local session_p = M._sessions[bufnr]
+    if not session_p or not session_p.query_spec then return end
+    -- Check if we're on the last page
+    if session_p.total_rows then
+      local total_pages = math.max(1, math.ceil(session_p.total_rows / session_p.query_spec.page_size))
+      if session_p.query_spec.page >= total_pages then
+        vim.notify("Already on last page", vim.log.levels.INFO)
+        return
+      end
+    end
+    if not confirm_discard_changes("Page change") then return end
+    local new_spec = qmod.next_page(session_p.query_spec)
+    if session_p.on_requery then session_p.on_requery(bufnr, new_spec) end
+  end, "Next page")
+
+  -- [p: previous page
+  map("[p", function()
+    local session_p = M._sessions[bufnr]
+    if not session_p or not session_p.query_spec then return end
+    if session_p.query_spec.page <= 1 then
+      vim.notify("Already on first page", vim.log.levels.INFO)
+      return
+    end
+    if not confirm_discard_changes("Page change") then return end
+    local new_spec = qmod.prev_page(session_p.query_spec)
+    if session_p.on_requery then session_p.on_requery(bufnr, new_spec) end
+  end, "Previous page")
+
+  -- ── FK navigation keymaps ─────────────────────────────────────────────
+
+  -- gf: navigate to FK referenced row
+  map("gf", function()
+    local session_fk = M._sessions[bufnr]
+    if not session_fk or not session_fk.state.table_name then
+      vim.notify("FK navigation requires a table name", vim.log.levels.INFO)
+      return
+    end
+    local cell = M.get_cell(bufnr)
+    if not cell then
+      vim.notify("Move cursor to a cell", vim.log.levels.INFO)
+      return
+    end
+    if cell.value == nil then
+      vim.notify("NULL value — cannot follow FK", vim.log.levels.INFO)
+      return
+    end
+
+    -- Fetch FK metadata (cached per table)
+    if not session_fk.fk_cache then session_fk.fk_cache = {} end
+    local tbl = session_fk.state.table_name
+    if not session_fk.fk_cache[tbl] then
+      local fks, fk_err = db.get_foreign_keys(tbl, session_fk.state.url)
+      if fk_err then
+        vim.notify("FK lookup failed: " .. fk_err, vim.log.levels.WARN)
+        return
+      end
+      session_fk.fk_cache[tbl] = fks or {}
+    end
+
+    -- Find FK for this column
+    local fk_info
+    for _, fk in ipairs(session_fk.fk_cache[tbl]) do
+      if fk.column == cell.col_name then
+        fk_info = fk
+        break
+      end
+    end
+    if not fk_info then
+      vim.notify(cell.col_name .. " is not a foreign key", vim.log.levels.INFO)
+      return
+    end
+
+    -- Push current state to nav stack
+    if not session_fk.nav_stack then session_fk.nav_stack = {} end
+    table.insert(session_fk.nav_stack, {
+      query_spec = session_fk.query_spec,
+      state = session_fk.state,
+      table_name = tbl,
+      cursor_pos = vim.api.nvim_win_get_cursor(0),
+      total_rows = session_fk.total_rows,
+    })
+
+    -- Build query for referenced row
+    local ref_spec = qmod.new_table(fk_info.ref_table, session_fk.query_spec.page_size)
+    ref_spec = qmod.add_filter(ref_spec, sql.quote_ident(fk_info.ref_column) .. " = " .. sql.quote_value(cell.value))
+    local ref_sql = qmod.build_sql(ref_spec)
+
+    local result, err = db.query(ref_sql, session_fk.state.url)
+    if err then
+      table.remove(session_fk.nav_stack) -- pop on failure
+      vim.notify("FK query failed: " .. err, vim.log.levels.WARN)
+      return
+    end
+
+    -- Fetch PKs for referenced table
+    local pks = db.get_primary_keys(fk_info.ref_table, session_fk.state.url) or {}
+    result.primary_keys = pks
+    result.table_name = fk_info.ref_table
+    result.url = session_fk.state.url
+    result.sql = ref_sql
+
+    local new_state = data.new(result)
+    session_fk.query_spec = ref_spec
+    session_fk.total_rows = #result.rows
+    M.render(bufnr, new_state)
+    vim.notify(tbl .. "." .. cell.col_name .. " → " .. fk_info.ref_table, vim.log.levels.INFO)
+  end, "Follow FK to referenced row")
+
+  -- <C-o>: go back in FK navigation stack
+  map("<C-o>", function()
+    local session_nav = M._sessions[bufnr]
+    if not session_nav then return end
+    if not session_nav.nav_stack or #session_nav.nav_stack == 0 then
+      vim.notify("No FK navigation history", vim.log.levels.INFO)
+      return
+    end
+    local frame = table.remove(session_nav.nav_stack)
+    session_nav.query_spec = frame.query_spec
+    session_nav.total_rows = frame.total_rows
+    M.render(bufnr, frame.state)
+    -- Restore cursor
+    if frame.cursor_pos then
+      pcall(vim.api.nvim_win_set_cursor, 0, frame.cursor_pos)
+    end
+    vim.notify("Back to " .. (frame.table_name or "previous"), vim.log.levels.INFO)
+  end, "Go back (FK navigation)")
+
+  -- ── aggregate / column stats / export keymaps ─────────────────────────
+
+  -- ga: aggregate selected cells (works after visual selection)
+  map("ga", function()
+    local session_a = M._sessions[bufnr]
+    if not session_a or not session_a._render then return end
+    local r = session_a._render
+    local st_a = session_a.state
+
+    -- Get visual selection range (uses '< and '> marks)
+    local start_line = vim.fn.line("'<")
+    local end_line = vim.fn.line("'>")
+    local ds = r.data_start or 4
+    if start_line == 0 or end_line == 0 then
+      -- No visual selection — use current cell
+      local cell = M.get_cell(bufnr)
+      if not cell then
+        vim.notify("Select cells first (visual mode) or position on a cell", vim.log.levels.INFO)
+        return
+      end
+      start_line = vim.api.nvim_win_get_cursor(0)[1]
+      end_line = start_line
+    end
+
+    -- Collect values from selected rows
+    local values = {}
+    local numeric_values = {}
+    for line = start_line, end_line do
+      local row_order = line - ds + 1
+      if row_order >= 1 and row_order <= #r.ordered then
+        local row_idx = r.ordered[row_order]
+        for _, col in ipairs(st_a.columns) do
+          local val = data.effective_value(st_a, row_idx, col)
+          if val ~= nil then
+            table.insert(values, val)
+            local num = tonumber(val)
+            if num then table.insert(numeric_values, num) end
+          end
+        end
+      end
+    end
+
+    if #values == 0 then
+      vim.notify("No values in selection", vim.log.levels.INFO)
+      return
+    end
+
+    local agg_parts = { "Count: " .. #values }
+    if #numeric_values > 0 then
+      local sum = 0
+      local min_v, max_v = numeric_values[1], numeric_values[1]
+      for _, n in ipairs(numeric_values) do
+        sum = sum + n
+        if n < min_v then min_v = n end
+        if n > max_v then max_v = n end
+      end
+      local avg = sum / #numeric_values
+      table.insert(agg_parts, string.format("Sum: %g", sum))
+      table.insert(agg_parts, string.format("Avg: %.2f", avg))
+      table.insert(agg_parts, string.format("Min: %g", min_v))
+      table.insert(agg_parts, string.format("Max: %g", max_v))
+    end
+
+    vim.notify(table.concat(agg_parts, "  │  "), vim.log.levels.INFO)
+  end, "Aggregate selected cells")
+
+  -- gS: column statistics
+  map("gS", function()
+    local session_cs = M._sessions[bufnr]
+    if not session_cs or not session_cs.state.table_name then
+      vim.notify("Column stats requires a table name", vim.log.levels.INFO)
+      return
+    end
+    local cell = M.get_cell(bufnr)
+    if not cell then
+      vim.notify("Move cursor to a column", vim.log.levels.INFO)
+      return
+    end
+    local tbl = session_cs.state.table_name
+    local col_q = sql.quote_ident(cell.col_name)
+    local stats_sql = string.format(
+      "SELECT COUNT(*) AS total, COUNT(DISTINCT %s) AS distinct_count, " ..
+      "COUNT(*) - COUNT(%s) AS null_count, MIN(%s) AS min_val, MAX(%s) AS max_val " ..
+      "FROM %s",
+      col_q, col_q, col_q, col_q, sql.quote_ident(tbl)
+    )
+    local result, err = db.query(stats_sql, session_cs.state.url)
+    if err then
+      vim.notify("Stats query failed: " .. err, vim.log.levels.WARN)
+      return
+    end
+    if not result or #result.rows == 0 then
+      vim.notify("No stats returned", vim.log.levels.INFO)
+      return
+    end
+    local row = result.rows[1]
+    local info = {
+      " " .. cell.col_name .. " — Column Statistics",
+      " " .. string.rep("─", 40),
+      "  Total:    " .. (row[1] or "?"),
+      "  Distinct: " .. (row[2] or "?"),
+      "  Nulls:    " .. (row[3] or "?"),
+      "  Min:      " .. (row[4] or "NULL"),
+      "  Max:      " .. (row[5] or "NULL"),
+    }
+
+    -- Try to get top 5 values
+    local top_sql = string.format(
+      "SELECT %s, COUNT(*) AS cnt FROM %s WHERE %s IS NOT NULL " ..
+      "GROUP BY %s ORDER BY cnt DESC LIMIT 5",
+      col_q, sql.quote_ident(tbl), col_q, col_q
+    )
+    local top_result = db.query(top_sql, session_cs.state.url)
+    if top_result and #top_result.rows > 0 then
+      table.insert(info, "")
+      table.insert(info, "  Top values:")
+      for _, r_top in ipairs(top_result.rows) do
+        local val = r_top[1] or "?"
+        local cnt = r_top[2] or "?"
+        table.insert(info, "    " .. tostring(val):sub(1, 30) .. "  (" .. cnt .. ")")
+      end
+    end
+
+    local grip_win = vim.api.nvim_get_current_win()
+    open_info_float(grip_win, info, { title = " Column Stats " })
+  end, "Column statistics")
+
+  -- gE: export in multiple formats
+  map("gE", function()
+    local session_e = M._sessions[bufnr]
+    if not session_e or not session_e._render then return end
+    local st_e = session_e.state
+    local r_e = session_e._render
+
+    local formats = { "CSV", "TSV", "JSON", "SQL INSERT", "Markdown" }
+    vim.ui.select(formats, { prompt = "Export format:" }, function(choice)
+      if not choice then return end
+
+      local cols = st_e.columns
+      local rows_data = {}
+      for _, row_idx in ipairs(r_e.ordered) do
+        local row = {}
+        for _, col in ipairs(cols) do
+          table.insert(row, data.effective_value(st_e, row_idx, col))
+        end
+        table.insert(rows_data, row)
+      end
+
+      local output
+      if choice == "CSV" then
+        local lines_out = { table.concat(cols, ",") }
+        for _, row in ipairs(rows_data) do
+          local parts = {}
+          for _, v in ipairs(row) do
+            local s = v or ""
+            if s:find('[,"\n]') then s = '"' .. s:gsub('"', '""') .. '"' end
+            table.insert(parts, s)
+          end
+          table.insert(lines_out, table.concat(parts, ","))
+        end
+        output = table.concat(lines_out, "\n")
+      elseif choice == "TSV" then
+        local lines_out = { table.concat(cols, "\t") }
+        for _, row in ipairs(rows_data) do
+          local parts = {}
+          for _, v in ipairs(row) do table.insert(parts, v or "") end
+          table.insert(lines_out, table.concat(parts, "\t"))
+        end
+        output = table.concat(lines_out, "\n")
+      elseif choice == "JSON" then
+        local objects = {}
+        for _, row in ipairs(rows_data) do
+          local obj_parts = {}
+          for ci, col in ipairs(cols) do
+            local v = row[ci]
+            local json_val
+            if v == nil then json_val = "null"
+            elseif tonumber(v) then json_val = v
+            elseif v == "true" or v == "false" then json_val = v
+            else json_val = '"' .. v:gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n') .. '"'
+            end
+            table.insert(obj_parts, '    "' .. col .. '": ' .. json_val)
+          end
+          table.insert(objects, "  {\n" .. table.concat(obj_parts, ",\n") .. "\n  }")
+        end
+        output = "[\n" .. table.concat(objects, ",\n") .. "\n]"
+      elseif choice == "SQL INSERT" then
+        local stmts = {}
+        local tbl = st_e.table_name or "table_name"
+        for _, row in ipairs(rows_data) do
+          local vals = {}
+          for _, v in ipairs(row) do table.insert(vals, sql.quote_value(v)) end
+          table.insert(stmts, string.format("INSERT INTO %s (%s) VALUES (%s);",
+            sql.quote_ident(tbl),
+            table.concat(vim.tbl_map(function(c) return sql.quote_ident(c) end, cols), ", "),
+            table.concat(vals, ", ")))
+        end
+        output = table.concat(stmts, "\n")
+      elseif choice == "Markdown" then
+        local hdr = "| " .. table.concat(cols, " | ") .. " |"
+        local sep = "| " .. table.concat(vim.tbl_map(function() return "---" end, cols), " | ") .. " |"
+        local lines_out = { hdr, sep }
+        for _, row in ipairs(rows_data) do
+          local parts = {}
+          for _, v in ipairs(row) do table.insert(parts, v or "") end
+          table.insert(lines_out, "| " .. table.concat(parts, " | ") .. " |")
+        end
+        output = table.concat(lines_out, "\n")
+      end
+
+      if output then
+        vim.fn.setreg("+", output)
+        vim.notify("Exported " .. #rows_data .. " rows as " .. choice .. " to clipboard", vim.log.levels.INFO)
+      end
+    end)
+  end, "Export in multiple formats")
+
   -- ?: help popup
   map("?", function()
     local grip_win = vim.api.nvim_get_current_win()  -- save for restore on close
@@ -1280,6 +1738,24 @@ function M._setup_keymaps(bufnr)
       "  y         Yank cell value to clipboard",
       "  Y         Yank row as CSV",
       "  gY        Yank entire table as CSV",
+      "",
+      "  Sort / Filter / Pagination",
+      "  s         Toggle sort on column (ASC→DESC→off)",
+      "  S         Stack secondary sort on column",
+      "  f         Quick filter by cell value",
+      "  <C-f>     Freeform WHERE clause filter",
+      "  F         Clear all filters",
+      "  ]p        Next page",
+      "  [p        Previous page",
+      "",
+      "  FK Navigation",
+      "  gf        Follow foreign key under cursor",
+      "  <C-o>     Go back in FK navigation stack",
+      "",
+      "  Analysis",
+      "  ga        Aggregate selected cells (visual mode)",
+      "  gS        Column statistics popup",
+      "  gE        Export table (CSV, JSON, SQL, Markdown)",
       "",
       "  Actions",
       "  r         Refresh (re-run query)",

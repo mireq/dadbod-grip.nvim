@@ -125,6 +125,64 @@ function M.get_column_info(table_name, url)
   return cols, nil
 end
 
+function M.get_foreign_keys(table_name, url)
+  local schema, tbl = table_name:match("^([^.]+)%.(.+)$")
+  if not schema then
+    schema = "public"
+    tbl = table_name
+  end
+
+  local fk_sql = string.format([[
+    SELECT
+      kcu.column_name,
+      ccu.table_name AS ref_table,
+      ccu.column_name AS ref_column
+    FROM information_schema.table_constraints tc
+    JOIN information_schema.key_column_usage kcu
+      ON tc.constraint_name = kcu.constraint_name
+      AND tc.table_schema = kcu.table_schema
+    JOIN information_schema.constraint_column_usage ccu
+      ON tc.constraint_name = ccu.constraint_name
+      AND tc.table_schema = ccu.table_schema
+    WHERE tc.constraint_type = 'FOREIGN KEY'
+      AND tc.table_schema = '%s'
+      AND tc.table_name = '%s'
+  ]], schema:gsub("'", "''"), tbl:gsub("'", "''"))
+
+  local stdout, stderr, code = psql(url, fk_sql)
+  if code ~= 0 then
+    return {}, stderr ~= "" and stderr or "Failed to query foreign keys"
+  end
+
+  local parsed = db_util.parse_csv(stdout)
+  if not parsed then return {} end
+
+  local fks = {}
+  for _, row in ipairs(parsed.rows) do
+    table.insert(fks, {
+      column = row[1] or "",
+      ref_table = row[2] or "",
+      ref_column = row[3] or "",
+    })
+  end
+  return fks, nil
+end
+
+function M.explain(sql_str, url)
+  local explain_sql = "EXPLAIN (FORMAT TEXT, ANALYZE) " .. sql_str
+  local stdout, stderr, code = psql(url, explain_sql)
+  if code ~= 0 then
+    return nil, stderr ~= "" and stderr or "EXPLAIN failed"
+  end
+  local parsed = db_util.parse_csv(stdout)
+  if not parsed then return nil, "Failed to parse EXPLAIN output" end
+  local lines = {}
+  for _, row in ipairs(parsed.rows) do
+    table.insert(lines, row[1] or "")
+  end
+  return { lines = lines }, nil
+end
+
 function M.execute(sql_str, url)
   if vim.fn.executable("psql") == 0 then
     return nil, "psql not found. Install postgresql-client."

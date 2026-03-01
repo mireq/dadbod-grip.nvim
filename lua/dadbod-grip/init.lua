@@ -6,6 +6,7 @@ local data   = require("dadbod-grip.data")
 local view   = require("dadbod-grip.view")
 local editor = require("dadbod-grip.editor")
 local sql    = require("dadbod-grip.sql")
+local query  = require("dadbod-grip.query")
 
 local M = {}
 
@@ -18,29 +19,22 @@ local OPTS = {
 
 -- ── helpers ───────────────────────────────────────────────────────────────
 
--- Decide the SQL to run for a given :Grip argument.
-local function resolve_sql(arg, limit)
+-- Decide the query spec for a given :Grip argument.
+-- Returns (spec, table_name) or (nil, err_string).
+local function resolve_query(arg, page_size)
   if not arg or arg == "" then
-    -- Word under cursor
     arg = vim.fn.expand("<cword>")
   end
   if arg == "" then
     return nil, "No table name or query provided."
   end
-  -- If it looks like a SELECT/WITH statement, run as-is
+  -- If it looks like a SELECT/WITH statement, run as raw query
   local upper = arg:upper():match("^%s*(%u+)")
   if upper == "SELECT" or upper == "WITH" or upper == "TABLE" then
-    return arg, nil
+    return query.new_raw(arg, page_size), nil
   end
   -- Otherwise treat as table name
-  return string.format("SELECT * FROM %s LIMIT %d", arg, limit), arg
-end
-
--- Extract table name from a SELECT * FROM <table> LIMIT query (best-effort).
-local function extract_table_name(arg_original, sql_str)
-  if arg_original then return arg_original end
-  local tbl = sql_str:match("[Ff][Rr][Oo][Mm]%s+([%w_%.\"]+)")
-  return tbl
+  return query.new_table(arg, page_size), arg
 end
 
 -- ── apply staged changes ──────────────────────────────────────────────────
@@ -176,19 +170,14 @@ function M.open(arg, url, opts)
     return
   end
 
-  -- Resolve SQL
-  local table_name_arg = nil
-  local query_sql, err_or_tbl = resolve_sql(arg, OPTS.limit)
-  if not query_sql then
-    vim.notify("Grip: " .. err_or_tbl, vim.log.levels.WARN)
+  -- Resolve query spec
+  local spec, table_name_arg = resolve_query(arg, OPTS.limit)
+  if not spec then
+    vim.notify("Grip: " .. table_name_arg, vim.log.levels.WARN)
     return
   end
-  -- err_or_tbl holds original arg (table name) when not a raw query
-  local upper = (arg or ""):upper():match("^%s*(%u+)")
-  if upper ~= "SELECT" and upper ~= "WITH" and upper ~= "TABLE" then
-    table_name_arg = arg ~= "" and arg or vim.fn.expand("<cword>")
-    if table_name_arg == "" then table_name_arg = nil end
-  end
+
+  local query_sql = query.build_sql(spec)
 
   -- Run query
   local result, qerr = db.query(query_sql, conn)
@@ -211,14 +200,52 @@ function M.open(arg, url, opts)
 
   local state = data.new(result)
 
-  -- Open the view (caller opts take precedence over defaults via "force")
+  -- Open the view
   local view_opts = vim.tbl_extend("force", { max_col_width = OPTS.max_col_width }, opts or {})
   local bufnr = view.open(state, conn, query_sql, view_opts)
+
+  -- Store query spec and run initial count for pagination
+  local session = view._sessions[bufnr]
+  if session then
+    session.query_spec = spec
+    -- Run count query for pagination
+    local count_sql = query.build_count_sql(spec)
+    local count_result = db.query(count_sql, conn)
+    if count_result and count_result.rows[1] then
+      session.total_rows = tonumber(count_result.rows[1][1]) or 0
+    end
+  end
 
   -- Wire callbacks
   view.set_callbacks(bufnr, {
     on_refresh = function(bid)
-      do_refresh(bid, conn, query_sql, table_name_arg)
+      local s = view._sessions[bid]
+      local sql_str = s and s.query_spec and query.build_sql(s.query_spec) or query_sql
+      do_refresh(bid, conn, sql_str, table_name_arg)
+    end,
+    on_requery = function(bid, new_spec)
+      local s = view._sessions[bid]
+      if not s then return end
+
+      -- Run count query for pagination
+      local count_sql = query.build_count_sql(new_spec)
+      local count_result = db.query(count_sql, conn)
+      if count_result and count_result.rows[1] then
+        s.total_rows = tonumber(count_result.rows[1][1]) or 0
+      end
+
+      -- Clamp page to valid range
+      if s.total_rows then
+        local total_pages = math.max(1, math.ceil(s.total_rows / new_spec.page_size))
+        if new_spec.page > total_pages then
+          new_spec = query.set_page(new_spec, total_pages)
+        end
+      end
+
+      s.query_spec = new_spec
+      local new_sql = query.build_sql(new_spec)
+      s.query_sql = new_sql
+      do_refresh(bid, conn, new_sql, table_name_arg)
     end,
     on_apply = function(bid)
       do_apply(bid, conn)
@@ -227,10 +254,10 @@ function M.open(arg, url, opts)
       do_edit(bid, cell, conn)
     end,
     on_delete = function(bid, row_idx)
-      local session = view._sessions[bid]
-      if not session then return end
-      local was_deleted = session.state.deleted[row_idx]
-      local new_state = data.toggle_delete(session.state, row_idx)
+      local session_d = view._sessions[bid]
+      if not session_d then return end
+      local was_deleted = session_d.state.deleted[row_idx]
+      local new_state = data.toggle_delete(session_d.state, row_idx)
       if was_deleted then
         vim.notify("Row " .. row_idx .. " unmarked", vim.log.levels.INFO)
       else
@@ -239,13 +266,13 @@ function M.open(arg, url, opts)
       view.render(bid, new_state)
     end,
     on_insert = function(bid, after_idx)
-      local session = view._sessions[bid]
-      if not session then return end
-      local new_state = data.insert_row(session.state, after_idx)
+      local session_i = view._sessions[bid]
+      if not session_i then return end
+      local new_state = data.insert_row(session_i.state, after_idx)
       view.render(bid, new_state)
       vim.notify("Inserted blank row", vim.log.levels.INFO)
       -- Move cursor to first cell of the new row
-      local r = session._render
+      local r = session_i._render
       if r then
         local ordered = r.ordered
         for i, idx in ipairs(ordered) do
@@ -359,6 +386,92 @@ function M.setup(opts)
   end, {
     nargs = "?",
     desc  = "Open dadbod-grip result grid for table or query",
+  })
+
+  -- Register :GripExplain command
+  vim.api.nvim_create_user_command("GripExplain", function(cmd_opts)
+    local arg = vim.trim(cmd_opts.args or "")
+
+    -- If no arg, try to get SQL from current grip session
+    if arg == "" then
+      local bufnr = vim.api.nvim_get_current_buf()
+      local session = view._sessions[bufnr]
+      if session and session.query_spec then
+        arg = query.build_sql(session.query_spec)
+      elseif session and session.query_sql then
+        arg = session.query_sql
+      end
+    end
+    if arg == "" then
+      vim.notify("GripExplain: provide a SQL query or run from a Grip buffer", vim.log.levels.WARN)
+      return
+    end
+
+    -- Resolve connection
+    local conn = vim.b.db
+    if type(conn) ~= "string" or conn == "" then conn = vim.g.db end
+    if type(conn) == "table" and conn.db_url then conn = conn.db_url end
+    if not conn or conn == "" then
+      vim.notify("GripExplain: no database connection", vim.log.levels.WARN)
+      return
+    end
+
+    local result, err = db.explain(arg, conn)
+    if err then
+      vim.notify("EXPLAIN failed: " .. err, vim.log.levels.ERROR)
+      return
+    end
+    if not result or not result.lines or #result.lines == 0 then
+      vim.notify("EXPLAIN returned no output", vim.log.levels.INFO)
+      return
+    end
+
+    -- Render in a float with color coding
+    local explain_lines = result.lines
+    local explain_buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(explain_buf, 0, -1, false, explain_lines)
+    vim.api.nvim_set_option_value("filetype", "sql", { buf = explain_buf })
+
+    local max_w = 0
+    for _, l in ipairs(explain_lines) do max_w = math.max(max_w, #l) end
+    local width = math.min(math.max(max_w + 4, 40), vim.o.columns - 10)
+    local height = math.min(#explain_lines, math.floor(vim.o.lines * 0.7))
+
+    local win = vim.api.nvim_open_win(explain_buf, true, {
+      relative = "editor",
+      row = math.floor((vim.o.lines - height) / 2),
+      col = math.floor((vim.o.columns - width) / 2),
+      width = width,
+      height = height,
+      style = "minimal",
+      border = "rounded",
+      title = " EXPLAIN Plan ",
+      title_pos = "center",
+    })
+
+    -- Color code cost lines (green for low, yellow for medium, red for high)
+    local explain_ns = vim.api.nvim_create_namespace("grip_explain")
+    for i, line in ipairs(explain_lines) do
+      local cost = line:match("cost=([%d.]+)")
+      if cost then
+        local c = tonumber(cost) or 0
+        local hl = c < 100 and "DiagnosticOk" or c < 1000 and "DiagnosticWarn" or "DiagnosticError"
+        vim.api.nvim_buf_set_extmark(explain_buf, explain_ns, i - 1, 0, {
+          end_col = #line,
+          hl_group = hl,
+        })
+      end
+    end
+
+    -- Close keymaps
+    for _, key in ipairs({ "q", "<Esc>" }) do
+      vim.keymap.set("n", key, function()
+        if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
+      end, { buffer = explain_buf })
+    end
+  end, {
+    nargs = "?",
+    desc  = "Show EXPLAIN plan for a query",
   })
 end
 

@@ -120,6 +120,49 @@ function M.get_column_info(table_name, url)
   return cols, nil
 end
 
+function M.get_foreign_keys(table_name, url)
+  local db_path = extract_path(url)
+  if not db_path then return {}, "Invalid SQLite URL: " .. url end
+
+  local tbl = table_name:gsub('^"', ''):gsub('"$', '')
+  tbl = tbl:match("^[^.]+%.(.+)$") or tbl
+
+  local stdout, stderr, code = sqlite3(db_path, string.format("PRAGMA foreign_key_list(%s)", tbl))
+  if code ~= 0 then
+    return {}, stderr ~= "" and stderr or "Failed to query foreign keys"
+  end
+
+  local parsed = db_util.parse_csv(stdout)
+  if not parsed then return {} end
+
+  -- PRAGMA foreign_key_list columns: id, seq, table, from, to, on_update, on_delete, match
+  local fks = {}
+  for _, row in ipairs(parsed.rows) do
+    table.insert(fks, {
+      column = row[4] or "",      -- "from" column in this table
+      ref_table = row[3] or "",   -- referenced table
+      ref_column = row[5] or "",  -- referenced column ("to")
+    })
+  end
+  return fks, nil
+end
+
+function M.explain(sql_str, url)
+  local db_path = extract_path(url)
+  if not db_path then return nil, "Invalid SQLite URL: " .. url end
+
+  local stdout, stderr, code = sqlite3(db_path, "EXPLAIN QUERY PLAN " .. sql_str)
+  if code ~= 0 then
+    return nil, stderr ~= "" and stderr or "EXPLAIN failed"
+  end
+
+  local lines = {}
+  for line in stdout:gmatch("([^\n]+)") do
+    table.insert(lines, line)
+  end
+  return { lines = lines }, nil
+end
+
 function M.execute(sql_str, url)
   if vim.fn.executable("sqlite3") == 0 then
     return nil, "sqlite3 not found. Install sqlite."
