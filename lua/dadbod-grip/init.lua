@@ -87,56 +87,39 @@ local function do_apply(bufnr, url)
   local inserts = data.get_inserts(st)
   local deletes = data.get_deletes(st)
 
-  local errors = {}
+  local total = #updates + #inserts + #deletes
+  if total == 0 then
+    vim.notify("No changes to apply", vim.log.levels.INFO)
+    return
+  end
 
-  -- Execute deletes first (avoids FK conflicts with inserts)
+  -- Build all statements
+  local stmts = {}
+
+  -- Deletes first (avoids FK conflicts with inserts)
   for _, del in ipairs(deletes) do
-    local stmt = sql.build_delete(st.table_name, del.pk_values)
-    local result, err = db.execute(stmt, url)
-    if err then
-      table.insert(errors, { sql = stmt, err = err })
-    elseif result.affected == 0 then
-      table.insert(errors, {
-        sql = stmt,
-        err = "0 rows affected — row may have been modified externally. Press r to refresh.",
-      })
-    end
+    table.insert(stmts, sql.build_delete(st.table_name, del.pk_values))
   end
-
   for _, upd in ipairs(updates) do
-    local stmt = sql.build_update(st.table_name, upd.pk_values, upd.changes)
-    local result, err = db.execute(stmt, url)
-    if err then
-      table.insert(errors, { sql = stmt, err = err })
-    elseif result.affected == 0 then
-      table.insert(errors, {
-        sql = stmt,
-        err = "0 rows affected — row may have been modified externally. Press r to refresh.",
-      })
-    end
+    table.insert(stmts, sql.build_update(st.table_name, upd.pk_values, upd.changes))
   end
-
   for _, ins in ipairs(inserts) do
-    local stmt = sql.build_insert(st.table_name, ins.values, ins.columns)
-    local _, err = db.execute(stmt, url)
-    if err then
-      table.insert(errors, { sql = stmt, err = err })
-    end
+    table.insert(stmts, sql.build_insert(st.table_name, ins.values, ins.columns))
   end
 
-  if #errors > 0 then
-    -- Show first error. Changes are preserved (not undone).
-    local first = errors[1]
-    local lines = {
-      "✗ " .. first.sql,
-      "",
-    }
-    for chunk in (first.err .. "\n"):gmatch("([^\n]+)\n?") do
-      if chunk ~= "" then table.insert(lines, "  " .. chunk) end
+  -- Wrap in transaction for atomicity (all or nothing)
+  local txn_sql = "BEGIN;\n" .. table.concat(stmts, ";\n") .. ";\nCOMMIT;"
+  local _, err = db.execute(txn_sql, url)
+
+  if err then
+    -- Transaction failed — DB auto-rolled back
+    local err_lines = { "✗ Transaction rolled back (" .. total .. " statement(s))", "" }
+    for chunk in (err .. "\n"):gmatch("([^\n]+)\n?") do
+      if chunk ~= "" then table.insert(err_lines, "  " .. chunk) end
     end
-    table.insert(lines, "")
-    table.insert(lines, "  Your change is preserved. Fix the value or press u to undo.")
-    editor.show_error("Apply failed", lines)
+    table.insert(err_lines, "")
+    table.insert(err_lines, "  Your changes are preserved. Fix the value or press u to undo.")
+    editor.show_error("Apply failed", err_lines)
     return
   end
 

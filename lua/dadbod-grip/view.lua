@@ -208,7 +208,7 @@ end
 -- ── main render ──────────────────────────────────────────────────────────
 -- Returns {lines=[], extmarks=[{row, col, end_col, hl_group}]}
 local function build_render(session, opts)
-  local max_w = (opts and opts.max_col_width) or MAX_COL_WIDTH
+  local configured_max = (opts and opts.max_col_width) or MAX_COL_WIDTH
   local st = session.state
   local columns = st.columns
   local ordered = data.get_ordered_rows(st)
@@ -234,7 +234,26 @@ local function build_render(session, opts)
     table.insert(display_rows, dr)
   end
 
-  local widths = calc_col_widths(columns, display_rows, max_w)
+  -- Auto-fit: compute natural widths first (clamped to configured max)
+  local widths = calc_col_widths(columns, display_rows, configured_max)
+
+  -- Smart auto-fit: if total fits, expand narrow columns proportionally
+  local available = vim.o.columns - 4  -- borders + padding
+  local total_natural = 0
+  for _, col in ipairs(columns) do total_natural = total_natural + widths[col] + 3 end
+  if #columns > 0 and total_natural < available then
+    -- Distribute extra space to columns that were truncated
+    local slack = available - total_natural
+    for _, col in ipairs(columns) do
+      if slack <= 0 then break end
+      local natural = widths[col]
+      if natural >= configured_max then
+        local extra = math.min(slack, 20)  -- max 20 extra chars per column
+        widths[col] = natural + extra
+        slack = slack - extra
+      end
+    end
+  end
 
   -- Total visual width of content area
   local total_inner = 0
