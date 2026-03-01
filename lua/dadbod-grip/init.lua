@@ -19,8 +19,25 @@ local OPTS = {
 
 -- ── helpers ───────────────────────────────────────────────────────────────
 
+-- File extensions DuckDB can query directly (file-as-table).
+local DUCKDB_EXTENSIONS = {
+  ".parquet", ".csv", ".tsv", ".json", ".ndjson", ".jsonl", ".xlsx",
+}
+
+--- Detect if arg is a queryable file path for DuckDB file-as-table.
+local function is_queryable_file(arg)
+  if not (arg:match("^/") or arg:match("^~/") or arg:match("^%./") or arg:match("^%.%./")) then
+    return false
+  end
+  local lower = arg:lower()
+  for _, ext in ipairs(DUCKDB_EXTENSIONS) do
+    if lower:sub(-#ext) == ext then return true end
+  end
+  return false
+end
+
 -- Decide the query spec for a given :Grip argument.
--- Returns (spec, table_name) or (nil, err_string).
+-- Returns (spec, table_name, file_path) or (nil, err_string).
 local function resolve_query(arg, page_size)
   if not arg or arg == "" then
     arg = vim.fn.expand("<cword>")
@@ -28,6 +45,21 @@ local function resolve_query(arg, page_size)
   if arg == "" then
     return nil, "No table name or query provided."
   end
+
+  -- File-as-table: route to DuckDB
+  if is_queryable_file(arg) then
+    local path = arg
+    if path:sub(1, 1) == "~" then
+      path = (os.getenv("HOME") or "") .. path:sub(2)
+    end
+    path = vim.fn.fnamemodify(path, ":p")
+    if vim.fn.filereadable(path) == 0 then
+      return nil, "File not found: " .. path
+    end
+    local file_sql = string.format("SELECT * FROM '%s'", path:gsub("'", "''"))
+    return query.new_raw(file_sql, page_size), nil, path
+  end
+
   -- If it looks like a SELECT/WITH statement, run as raw query
   local upper = arg:upper():match("^%s*(%u+)")
   if upper == "SELECT" or upper == "WITH" or upper == "TABLE" then
@@ -165,15 +197,21 @@ function M.open(arg, url, opts)
     conn = vim.b.db
     if not conn or conn == "" then conn = vim.g.db end
   end
-  if not conn or conn == "" then
-    vim.notify("Grip: no database connection. Open DBUI first or set vim.g.db.", vim.log.levels.WARN)
+
+  -- Resolve query spec (must happen before connection check for file-as-table)
+  local spec, table_name_arg, file_path = resolve_query(arg, OPTS.limit)
+  if not spec then
+    vim.notify("Grip: " .. table_name_arg, vim.log.levels.WARN)
     return
   end
 
-  -- Resolve query spec
-  local spec, table_name_arg = resolve_query(arg, OPTS.limit)
-  if not spec then
-    vim.notify("Grip: " .. table_name_arg, vim.log.levels.WARN)
+  -- File-as-table: force DuckDB adapter (works even with no db set)
+  if file_path then
+    conn = "duckdb::memory:"
+  end
+
+  if not conn or conn == "" then
+    vim.notify("Grip: no database connection. Open DBUI first or set vim.g.db.", vim.log.levels.WARN)
     return
   end
 
