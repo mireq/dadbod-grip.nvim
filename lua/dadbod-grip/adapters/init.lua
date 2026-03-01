@@ -7,6 +7,8 @@ local SCHEME_MAP = {
   ["postgresql://"] = "dadbod-grip.adapters.postgresql",
   ["postgres://"]   = "dadbod-grip.adapters.postgresql",
   ["sqlite:"]       = "dadbod-grip.adapters.sqlite",
+  ["mysql://"]      = "dadbod-grip.adapters.mysql",
+  ["mariadb://"]    = "dadbod-grip.adapters.mysql",
 }
 
 --- Resolve the adapter module for a given connection URL.
