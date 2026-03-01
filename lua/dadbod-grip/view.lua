@@ -25,6 +25,8 @@ local BOT_L   = "╚"
 local BOT_R   = "╝"
 local BOT_MID = "╧"
 local TOP_MID = "╤"
+local FREEZE_SEP = "┃"
+local FREEZE_MID = "╋"
 
 -- ── highlight group setup ──────────────────────────────────────────────────
 local function ensure_highlights()
@@ -38,6 +40,7 @@ local function ensure_highlights()
     GripBorder   = "bold",
     GripStatusOk = "bold",
     GripStatusChg = "bold",
+    GripFreeze   = "bold",
   }
   for name, _ in pairs(groups) do
     if vim.fn.hlID(name) == 0 then
@@ -49,6 +52,7 @@ local function ensure_highlights()
       if name == "GripReadonly" then vim.cmd("hi GripReadonly gui=italic ctermfg=243 guifg=#6c7086") end
       if name == "GripBorder"   then vim.cmd("hi GripBorder gui=bold ctermfg=147 guifg=#cba6f7") end
       if name == "GripStatusChg" then vim.cmd("hi GripStatusChg gui=bold ctermfg=229 guifg=#f9e2af") end
+      if name == "GripFreeze"   then vim.cmd("hi GripFreeze gui=bold ctermfg=147 guifg=#f5c2e7") end
     end
   end
 end
@@ -96,11 +100,17 @@ local function format_cell(value, width, is_null_staged)
 end
 
 -- ── border line builders ──────────────────────────────────────────────────
-local function border_line(columns, widths, left, mid, sep, right)
+local function border_line(columns, widths, left, mid, sep, right, freeze_after)
   local parts = { left }
   for i, col in ipairs(columns) do
     table.insert(parts, string.rep(sep, widths[col] + 2))
-    if i < #columns then table.insert(parts, mid) end
+    if i < #columns then
+      if freeze_after and i == freeze_after then
+        table.insert(parts, FREEZE_MID)
+      else
+        table.insert(parts, mid)
+      end
+    end
   end
   table.insert(parts, right)
   return table.concat(parts)
@@ -114,6 +124,9 @@ local function title_line(session, columns, widths, total_width)
   if session.state.readonly then table.insert(badges, "read-only: no PK") end
   if session.query_spec and qmod.has_filters(session.query_spec) then
     table.insert(badges, "filtered")
+  end
+  if session.pinned_count and session.pinned_count > 0 then
+    table.insert(badges, session.pinned_count .. " pinned")
   end
   local right_info = #badges > 0 and (" [" .. table.concat(badges, " | ") .. "] ") or " "
 
@@ -142,6 +155,8 @@ local function build_render(session, opts)
   local st = session.state
   local columns = st.columns
   local ordered = data.get_ordered_rows(st)
+  local pin = session.pinned_count or 0
+  if pin >= #columns then pin = 0 end  -- can't pin all columns
 
   -- Compute column widths across all rows including staged changes
   local display_rows = {}
@@ -191,7 +206,10 @@ local function build_render(session, opts)
     end
     local padded = label .. string.rep(" ", w - lw)
     table.insert(hdr_parts, padded)
-    if i < #columns then table.insert(hdr_parts, " " .. SEP_COL .. " ") end
+    if i < #columns then
+      local col_sep = (pin > 0 and i == pin) and (" " .. FREEZE_SEP .. " ") or (" " .. SEP_COL .. " ")
+      table.insert(hdr_parts, col_sep)
+    end
   end
   table.insert(hdr_parts, " ║")
   local hdr_line = table.concat(hdr_parts)
@@ -216,7 +234,10 @@ local function build_render(session, opts)
       end
       local padded = dtype .. string.rep(" ", w - dw)
       table.insert(type_parts, padded)
-      if i < #columns then table.insert(type_parts, " " .. SEP_COL .. " ") end
+      if i < #columns then
+        local col_sep = (pin > 0 and i == pin) and (" " .. FREEZE_SEP .. " ") or (" " .. SEP_COL .. " ")
+        table.insert(type_parts, col_sep)
+      end
     end
     table.insert(type_parts, " ║")
     local type_line = table.concat(type_parts)
@@ -226,7 +247,8 @@ local function build_render(session, opts)
   end
 
   -- ── Separator after header ──
-  local sep_line = border_line(columns, widths, MID_L, SEP_MID, SEP_HDR, MID_R)
+  local freeze_at = pin > 0 and pin or nil
+  local sep_line = border_line(columns, widths, MID_L, SEP_MID, SEP_HDR, MID_R, freeze_at)
   table.insert(lines, sep_line)
   push_mark(#lines, 0, #sep_line, "GripBorder")
 
@@ -273,8 +295,9 @@ local function build_render(session, opts)
         byte_pos = byte_pos + #cell_str
 
         if i < #columns then
-          table.insert(row_parts, COL_SEP)
-          byte_pos = byte_pos + COL_SEP_BYTES  -- 5 bytes, not 3
+          local sep = (pin > 0 and i == pin) and (" " .. FREEZE_SEP .. " ") or COL_SEP
+          table.insert(row_parts, sep)
+          byte_pos = byte_pos + #sep  -- same byte width (5) for both separators
         end
       end
 
@@ -309,7 +332,7 @@ local function build_render(session, opts)
   end
 
   -- ── Bottom border ──
-  local bot_line = border_line(columns, widths, BOT_L, BOT_MID, SEP_HDR, BOT_R)
+  local bot_line = border_line(columns, widths, BOT_L, BOT_MID, SEP_HDR, BOT_R, freeze_at)
   table.insert(lines, bot_line)
   push_mark(#lines, 0, #bot_line, "GripBorder")
 
@@ -326,6 +349,7 @@ local function build_render(session, opts)
 
   if staged_count > 0 then table.insert(status_parts, staged_count .. " staged") end
   if st.readonly then table.insert(status_parts, "read-only") end
+  if pin > 0 then table.insert(status_parts, pin .. " pinned") end
 
   -- Filter summary
   if session.query_spec then
@@ -1136,21 +1160,58 @@ function M._setup_keymaps(bufnr)
     vim.api.nvim_win_set_cursor(0, { last, cursor[2] })
   end, "Last data row")
 
-  -- 0/^: first column of current row
-  for _, key in ipairs({ "0", "^" }) do
-    map(key, function()
+  -- ^: first column of current row (always)
+  map("^", function()
+    local session = M._sessions[bufnr]
+    if not session or not session._render then return end
+    local r = session._render
+    local cols = session.state.columns
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    local ds = r.data_start or 4
+    local row_order_idx = cursor[1] - ds + 1
+    local bp_row = r.byte_positions and r.byte_positions[row_order_idx]
+    if not bp_row then return end
+    local target_byte = bp_row[cols[1]].start
+    vim.api.nvim_win_set_cursor(0, { cursor[1], target_byte })
+  end, "First column")
+
+  -- 0: unpin all OR first column (dual behavior)
+  map("0", function()
+    local session = M._sessions[bufnr]
+    if not session then return end
+    if session.pinned_count and session.pinned_count > 0 then
+      session.pinned_count = 0
+      vim.notify("Unpinned all columns", vim.log.levels.INFO)
+      M.render(bufnr, session.state)
+      return
+    end
+    -- Fallback: jump to first column
+    if not session._render then return end
+    local r = session._render
+    local cols = session.state.columns
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    local ds = r.data_start or 4
+    local row_order_idx = cursor[1] - ds + 1
+    local bp_row = r.byte_positions and r.byte_positions[row_order_idx]
+    if not bp_row then return end
+    local target_byte = bp_row[cols[1]].start
+    vim.api.nvim_win_set_cursor(0, { cursor[1], target_byte })
+  end, "Unpin all / first column")
+
+  -- 1-9: pin N leftmost columns
+  for n = 1, 9 do
+    map(tostring(n), function()
       local session = M._sessions[bufnr]
-      if not session or not session._render then return end
-      local r = session._render
+      if not session then return end
       local cols = session.state.columns
-      local cursor = vim.api.nvim_win_get_cursor(0)
-      local ds = r.data_start or 4
-      local row_order_idx = cursor[1] - ds + 1
-      local bp_row = r.byte_positions and r.byte_positions[row_order_idx]
-      if not bp_row then return end
-      local target_byte = bp_row[cols[1]].start
-      vim.api.nvim_win_set_cursor(0, { cursor[1], target_byte })
-    end, "First column")
+      if n >= #cols then
+        vim.notify("Only " .. #cols .. " columns", vim.log.levels.INFO)
+        return
+      end
+      session.pinned_count = n
+      vim.notify("Pinned " .. n .. " column(s)", vim.log.levels.INFO)
+      M.render(bufnr, session.state)
+    end, "Pin " .. n .. " column(s)")
   end
 
   -- $: last column of current row
@@ -1793,7 +1854,9 @@ function M._setup_keymaps(bufnr)
       "  Tab/S-Tab Next / previous column",
       "  gg        First data row",
       "  G         Last data row",
-      "  0/^       First column",
+      "  ^         First column",
+      "  1-9       Pin N leftmost columns (freeze)",
+      "  0         Unpin all / first column",
       "  $         Last column",
       "  {/}       Prev / next modified row",
       "  <CR>      Expand cell value in popup",
