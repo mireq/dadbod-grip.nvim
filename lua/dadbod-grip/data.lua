@@ -31,6 +31,25 @@ local function deep_copy(t)
   return copy
 end
 
+--- Shallow-copy a state, deep-copying only the mutable subtrees
+--- (changes, deleted, inserted). Rows, columns, and pks are shared
+--- since they are never mutated after creation.
+local function edit_copy(state)
+  return {
+    rows             = state.rows,      -- immutable: share
+    columns          = state.columns,   -- immutable: share
+    pks              = state.pks,       -- immutable: share
+    table_name       = state.table_name,
+    url              = state.url,
+    sql              = state.sql,
+    changes          = deep_copy(state.changes),
+    deleted          = deep_copy(state.deleted),
+    inserted         = deep_copy(state.inserted),
+    _next_insert_idx = state._next_insert_idx,
+    readonly         = state.readonly,
+  }
+end
+
 -- M.new(query_result) → State
 -- query_result = { rows, columns, primary_keys, table_name, url, sql }
 function M.new(query_result)
@@ -56,7 +75,7 @@ end
 -- value=nil means "set to NULL" — stored as NULL_SENTINEL internally so the
 -- key survives in the Lua table (assigning nil would remove it).
 function M.add_change(state, row_idx, field, value)
-  local s = deep_copy(state)
+  local s = edit_copy(state)
   -- Empty string and explicit nil both become NULL
   local stored = (value == nil or value == "") and NULL_SENTINEL or value
   -- Inserted rows: write directly into inserted.values (not changes table)
@@ -71,7 +90,7 @@ end
 
 -- M.toggle_delete(state, row_idx) → State
 function M.toggle_delete(state, row_idx)
-  local s = deep_copy(state)
+  local s = edit_copy(state)
   if s.deleted[row_idx] then
     s.deleted[row_idx] = nil
   else
@@ -83,7 +102,7 @@ end
 -- M.insert_row(state, after_idx) → State
 -- Adds a blank row placeholder after after_idx.
 function M.insert_row(state, after_idx)
-  local s = deep_copy(state)
+  local s = edit_copy(state)
   local new_idx = s._next_insert_idx
   s._next_insert_idx = s._next_insert_idx + 1
   local blank = {}
@@ -95,7 +114,7 @@ end
 -- M.undo_row(state, row_idx) → State
 -- Removes all staged changes/deletions for a row. For inserts, removes the row.
 function M.undo_row(state, row_idx)
-  local s = deep_copy(state)
+  local s = edit_copy(state)
   s.changes[row_idx] = nil
   s.deleted[row_idx] = nil
   s.inserted[row_idx] = nil
@@ -104,7 +123,7 @@ end
 
 -- M.undo_all(state) → State
 function M.undo_all(state)
-  local s = deep_copy(state)
+  local s = edit_copy(state)
   s.changes = {}
   s.deleted = {}
   s.inserted = {}

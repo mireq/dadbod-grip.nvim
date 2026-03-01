@@ -9,6 +9,17 @@ local qmod  = require("dadbod-grip.query")
 local M = {}
 M._sessions = {}  -- [bufnr] = { state, url, query_sql }
 
+-- ── profiling (set GRIP_PROFILE=1 to enable) ───────────────────────────────
+local PROFILE = os.getenv("GRIP_PROFILE")
+local function profile(name, fn)
+  if not PROFILE then return fn() end
+  local start = vim.uv.hrtime()
+  local result = fn()
+  local elapsed = (vim.uv.hrtime() - start) / 1e6
+  print(string.format("[grip] %s: %.1fms", name, elapsed))
+  return result
+end
+
 -- ── constants ──────────────────────────────────────────────────────────────
 local NULL_DISPLAY  = "·NULL·"
 local BINARY_PREFIX = "<binary"
@@ -73,12 +84,19 @@ local function calc_col_widths(columns, rows, max_width)
   for _, col in ipairs(columns) do
     widths[col] = math.min(vim.fn.strdisplaywidth(col), max_width)
   end
-  for _, row_data in ipairs(rows) do
+  -- For large tables, sample first 100 + last 10 rows instead of scanning all
+  local n = #rows
+  local sample_end = n > 200 and 100 or n
+  local function scan_row(row_data)
     for i, col in ipairs(columns) do
       local v = row_data[i] or ""
       local display = (v == nil or v == "") and NULL_DISPLAY or tostring(v)
       widths[col] = math.min(math.max(widths[col], vim.fn.strdisplaywidth(display)), max_width)
     end
+  end
+  for ri = 1, sample_end do scan_row(rows[ri]) end
+  if n > 200 then
+    for ri = math.max(sample_end + 1, n - 9), n do scan_row(rows[ri]) end
   end
   return widths
 end
@@ -488,7 +506,9 @@ function M.render(bufnr, state)
   end
 
   local opts = session.opts or {}
-  local rendered = build_render(session, opts)
+  local rendered = profile("build_render", function()
+    return build_render(session, opts)
+  end)
   session._render = rendered  -- cache for get_cell
 
   vim.api.nvim_set_option_value("modifiable", true, { buf = bufnr })
