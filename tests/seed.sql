@@ -2,11 +2,15 @@
 -- Usage: createdb grip_test && psql grip_test < tests/seed.sql
 --
 -- Covers: CRUD, composite PKs, JSON, unicode, wide tables,
--- binary data, empty tables, type diversity, and long values.
+-- binary data, empty tables, type diversity, long values,
+-- foreign keys, pagination-scale data, aggregation targets.
 
 BEGIN;
 
--- Clean slate
+-- Clean slate (FK-aware drop order)
+DROP TABLE IF EXISTS order_items CASCADE;
+DROP TABLE IF EXISTS orders CASCADE;
+DROP TABLE IF EXISTS products CASCADE;
 DROP TABLE IF EXISTS long_values CASCADE;
 DROP TABLE IF EXISTS type_zoo CASCADE;
 DROP TABLE IF EXISTS empty_table CASCADE;
@@ -20,7 +24,7 @@ DROP TABLE IF EXISTS users CASCADE;
 DROP TYPE  IF EXISTS mood CASCADE;
 
 -- ── users ────────────────────────────────────────────────────────────────
--- Normal CRUD: varchar, integer, timestamp, email
+-- Normal CRUD: varchar, integer, timestamp, email. 15 rows for sort/filter.
 CREATE TABLE users (
   id         SERIAL PRIMARY KEY,
   name       VARCHAR(100) NOT NULL,
@@ -30,11 +34,21 @@ CREATE TABLE users (
 );
 
 INSERT INTO users (name, email, age) VALUES
-  ('Alice',   'alice@example.com',   30),
-  ('Bob',     'bob@example.com',     25),
-  ('Charlie', 'charlie@example.com', NULL),
-  ('Diana',   NULL,                  42),
-  ('Eve',     'eve@example.com',     19);
+  ('Alice',     'alice@example.com',     30),
+  ('Bob',       'bob@example.com',       25),
+  ('Charlie',   'charlie@example.com',   NULL),
+  ('Diana',     NULL,                    42),
+  ('Eve',       'eve@example.com',       19),
+  ('Frank',     'frank@example.com',     35),
+  ('Grace',     'grace@example.com',     28),
+  ('Hank',      'hank@example.com',      51),
+  ('Ivy',       'ivy@example.com',       22),
+  ('Jack',      'jack@example.com',      NULL),
+  ('Karen',     'karen@example.com',     38),
+  ('Leo',       'leo@example.com',       45),
+  ('Mona',      'mona@example.com',      31),
+  ('Nate',      NULL,                    27),
+  ('Olivia',    'olivia@example.com',    33);
 
 -- ── no_pk_view ───────────────────────────────────────────────────────────
 -- Read-only mode (no primary key)
@@ -56,6 +70,86 @@ INSERT INTO composite_pk (tenant_id, user_id, role, active) VALUES
   (1, 101, 'member', TRUE),
   (2, 100, 'viewer', FALSE),
   (2, 200, 'admin',  TRUE);
+
+-- ── products ─────────────────────────────────────────────────────────────
+-- FK target for orders/order_items. 20 products across categories.
+CREATE TABLE products (
+  id       SERIAL PRIMARY KEY,
+  name     VARCHAR(100) NOT NULL,
+  price    NUMERIC(10,2) NOT NULL,
+  category VARCHAR(50) NOT NULL
+);
+
+INSERT INTO products (name, price, category) VALUES
+  ('Widget A',       9.99,  'widgets'),
+  ('Widget B',      14.99,  'widgets'),
+  ('Widget C',      24.99,  'widgets'),
+  ('Gadget X',      49.99,  'gadgets'),
+  ('Gadget Y',      79.99,  'gadgets'),
+  ('Gadget Z',     149.99,  'gadgets'),
+  ('Doohickey 1',    4.99,  'accessories'),
+  ('Doohickey 2',    7.99,  'accessories'),
+  ('Doohickey 3',   12.99,  'accessories'),
+  ('Thingamajig',   29.99,  'misc'),
+  ('Whatchamacallit', 19.99, 'misc'),
+  ('Gizmo Alpha',   99.99,  'gizmos'),
+  ('Gizmo Beta',   199.99,  'gizmos'),
+  ('Gizmo Gamma',  299.99,  'gizmos'),
+  ('Part 001',       2.49,  'parts'),
+  ('Part 002',       3.49,  'parts'),
+  ('Part 003',       1.99,  'parts'),
+  ('Part 004',       5.99,  'parts'),
+  ('Premium Kit',  499.99,  'kits'),
+  ('Starter Kit',   59.99,  'kits');
+
+-- ── orders ───────────────────────────────────────────────────────────────
+-- FK to users. 150 rows for pagination testing (page_size=100 → 2 pages).
+CREATE TABLE orders (
+  id         SERIAL PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  total      NUMERIC(10,2) NOT NULL,
+  status     VARCHAR(20) NOT NULL DEFAULT 'pending',
+  ordered_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Generate 150 orders across 15 users, varied totals and statuses
+INSERT INTO orders (user_id, total, status, ordered_at)
+SELECT
+  ((g - 1) % 15) + 1 AS user_id,
+  ROUND((5.0 + (g * 7.3) % 500)::numeric, 2) AS total,
+  CASE (g % 5)
+    WHEN 0 THEN 'pending'
+    WHEN 1 THEN 'shipped'
+    WHEN 2 THEN 'delivered'
+    WHEN 3 THEN 'cancelled'
+    WHEN 4 THEN 'returned'
+  END AS status,
+  '2025-01-01'::timestamp + (g % 365) * interval '1 day'
+    + (g * 37 % 24) * interval '1 hour'
+    + (g * 13 % 60) * interval '1 minute' AS ordered_at
+FROM generate_series(1, 150) AS g;
+
+-- ── order_items ──────────────────────────────────────────────────────────
+-- FK to orders AND products. Multi-level FK navigation testing.
+CREATE TABLE order_items (
+  id          SERIAL PRIMARY KEY,
+  order_id    INTEGER NOT NULL REFERENCES orders(id),
+  product_id  INTEGER NOT NULL REFERENCES products(id),
+  quantity    INTEGER NOT NULL DEFAULT 1,
+  unit_price  NUMERIC(10,2) NOT NULL
+);
+
+-- 1-3 items per order
+INSERT INTO order_items (order_id, product_id, quantity, unit_price)
+SELECT
+  o.id AS order_id,
+  ((o.id * 3 + item_num) % 20) + 1 AS product_id,
+  (o.id + item_num) % 5 + 1 AS quantity,
+  p.price AS unit_price
+FROM orders o
+CROSS JOIN (VALUES (0), (1), (2)) AS items(item_num)
+JOIN products p ON p.id = ((o.id * 3 + items.item_num) % 20) + 1
+WHERE items.item_num < (o.id % 3) + 1;
 
 -- ── json_data ────────────────────────────────────────────────────────────
 -- json and jsonb columns with nested objects, arrays, nulls

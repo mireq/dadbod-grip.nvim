@@ -3,10 +3,17 @@
 --
 -- Mirrors tests/seed.sql (PostgreSQL) as closely as SQLite allows.
 -- Covers: CRUD, composite PKs, JSON, unicode, wide tables,
--- binary data, empty tables, type diversity, and long values.
+-- binary data, empty tables, type diversity, long values,
+-- foreign keys, pagination-scale data, aggregation targets.
 
--- Clean slate
+-- Enable foreign keys (SQLite has them off by default)
+PRAGMA foreign_keys = ON;
+
+-- Clean slate (FK-aware drop order)
 DROP VIEW  IF EXISTS no_pk_view;
+DROP TABLE IF EXISTS order_items;
+DROP TABLE IF EXISTS orders;
+DROP TABLE IF EXISTS products;
 DROP TABLE IF EXISTS long_values;
 DROP TABLE IF EXISTS type_zoo;
 DROP TABLE IF EXISTS empty_table;
@@ -18,7 +25,7 @@ DROP TABLE IF EXISTS composite_pk;
 DROP TABLE IF EXISTS users;
 
 -- ── users ────────────────────────────────────────────────────────────────
--- Normal CRUD: text, integer, timestamp, email
+-- Normal CRUD: text, integer, timestamp, email. 15 rows for sort/filter.
 CREATE TABLE users (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   name       TEXT NOT NULL,
@@ -28,11 +35,21 @@ CREATE TABLE users (
 );
 
 INSERT INTO users (name, email, age) VALUES
-  ('Alice',   'alice@example.com',   30),
-  ('Bob',     'bob@example.com',     25),
-  ('Charlie', 'charlie@example.com', NULL),
-  ('Diana',   NULL,                  42),
-  ('Eve',     'eve@example.com',     19);
+  ('Alice',     'alice@example.com',     30),
+  ('Bob',       'bob@example.com',       25),
+  ('Charlie',   'charlie@example.com',   NULL),
+  ('Diana',     NULL,                    42),
+  ('Eve',       'eve@example.com',       19),
+  ('Frank',     'frank@example.com',     35),
+  ('Grace',     'grace@example.com',     28),
+  ('Hank',      'hank@example.com',      51),
+  ('Ivy',       'ivy@example.com',       22),
+  ('Jack',      'jack@example.com',      NULL),
+  ('Karen',     'karen@example.com',     38),
+  ('Leo',       'leo@example.com',       45),
+  ('Mona',      'mona@example.com',      31),
+  ('Nate',      NULL,                    27),
+  ('Olivia',    'olivia@example.com',    33);
 
 -- ── no_pk_view ───────────────────────────────────────────────────────────
 -- Read-only mode (no primary key)
@@ -54,6 +71,91 @@ INSERT INTO composite_pk (tenant_id, user_id, role, active) VALUES
   (1, 101, 'member', 1),
   (2, 100, 'viewer', 0),
   (2, 200, 'admin',  1);
+
+-- ── products ─────────────────────────────────────────────────────────────
+-- FK target for orders/order_items. 20 products across categories.
+CREATE TABLE products (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  name     TEXT NOT NULL,
+  price    REAL NOT NULL,
+  category TEXT NOT NULL
+);
+
+INSERT INTO products (name, price, category) VALUES
+  ('Widget A',       9.99,  'widgets'),
+  ('Widget B',      14.99,  'widgets'),
+  ('Widget C',      24.99,  'widgets'),
+  ('Gadget X',      49.99,  'gadgets'),
+  ('Gadget Y',      79.99,  'gadgets'),
+  ('Gadget Z',     149.99,  'gadgets'),
+  ('Doohickey 1',    4.99,  'accessories'),
+  ('Doohickey 2',    7.99,  'accessories'),
+  ('Doohickey 3',   12.99,  'accessories'),
+  ('Thingamajig',   29.99,  'misc'),
+  ('Whatchamacallit', 19.99, 'misc'),
+  ('Gizmo Alpha',   99.99,  'gizmos'),
+  ('Gizmo Beta',   199.99,  'gizmos'),
+  ('Gizmo Gamma',  299.99,  'gizmos'),
+  ('Part 001',       2.49,  'parts'),
+  ('Part 002',       3.49,  'parts'),
+  ('Part 003',       1.99,  'parts'),
+  ('Part 004',       5.99,  'parts'),
+  ('Premium Kit',  499.99,  'kits'),
+  ('Starter Kit',   59.99,  'kits');
+
+-- ── orders ───────────────────────────────────────────────────────────────
+-- FK to users. 150 rows for pagination testing (page_size=100 → 2 pages).
+-- Also tests sort on numeric/date columns and filter by FK values.
+CREATE TABLE orders (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  total      REAL NOT NULL,
+  status     TEXT NOT NULL DEFAULT 'pending',
+  ordered_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Generate 150 orders across 15 users, varied totals and statuses
+-- Use recursive CTE since SQLite may lack generate_series
+WITH RECURSIVE seq(value) AS (
+  SELECT 1 UNION ALL SELECT value + 1 FROM seq WHERE value < 150
+)
+INSERT INTO orders (user_id, total, status, ordered_at)
+SELECT
+  ((value - 1) % 15) + 1 AS user_id,
+  ROUND(5.0 + (value * 7.3 % 500), 2) AS total,
+  CASE (value % 5)
+    WHEN 0 THEN 'pending'
+    WHEN 1 THEN 'shipped'
+    WHEN 2 THEN 'delivered'
+    WHEN 3 THEN 'cancelled'
+    WHEN 4 THEN 'returned'
+  END AS status,
+  datetime('2025-01-01', '+' || (value % 365) || ' days',
+           '+' || (value * 37 % 24) || ' hours',
+           '+' || (value * 13 % 60) || ' minutes') AS ordered_at
+FROM seq;
+
+-- ── order_items ──────────────────────────────────────────────────────────
+-- FK to orders AND products. Multi-level FK navigation testing.
+CREATE TABLE order_items (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id    INTEGER NOT NULL REFERENCES orders(id),
+  product_id  INTEGER NOT NULL REFERENCES products(id),
+  quantity    INTEGER NOT NULL DEFAULT 1,
+  unit_price  REAL NOT NULL
+);
+
+-- 1-3 items per order
+INSERT INTO order_items (order_id, product_id, quantity, unit_price)
+SELECT
+  o.id AS order_id,
+  ((o.id * 3 + item_num) % 20) + 1 AS product_id,
+  (o.id + item_num) % 5 + 1 AS quantity,
+  p.price AS unit_price
+FROM orders o
+CROSS JOIN (SELECT 0 AS item_num UNION ALL SELECT 1 UNION ALL SELECT 2) items
+JOIN products p ON p.id = ((o.id * 3 + items.item_num) % 20) + 1
+WHERE items.item_num < (o.id % 3) + 1;
 
 -- ── json_data ────────────────────────────────────────────────────────────
 -- JSON columns with nested objects, arrays, nulls
