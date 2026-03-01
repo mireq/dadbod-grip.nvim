@@ -38,6 +38,13 @@ Then `:Grip` from any DBUI buffer. That's it.
 - **Immutable state management** with full undo (per-row and global)
 - **Stage changes visually** with color-coded rows (blue=modified, red=deleted, green=inserted)
 - **Pure SQL generation** with preview before apply
+- **Sort, filter, pagination** — `s`/`S` sort, `f`/`<C-f>`/`F` filter, `]p`/`[p` pages
+- **Foreign key navigation** — `gf` follows FK to referenced row, `<C-o>` goes back
+- **Column statistics** — `gS` shows count, distinct, nulls, min/max, top values
+- **Aggregate on selection** — `ga` in visual mode shows count/sum/avg/min/max
+- **Export formats** — `gE` picker: CSV, TSV, JSON, SQL INSERT, Markdown
+- **EXPLAIN plan viewer** — `:GripExplain` renders color-coded query plans
+- **Multi-database** — PostgreSQL and SQLite adapters (DuckDB, MySQL planned)
 - **Composite primary key support** for multi-column WHERE clauses
 - **Read-only mode** auto-detected when no primary key exists
 - **DBUI integration** via `open_smart()` for seamless two-pane workflow
@@ -46,7 +53,6 @@ Then `:Grip` from any DBUI buffer. That's it.
 - **Row view transpose** (`K`) vertical column-by-column view of current row
 - **Vim-native grid navigation** (`gg`/`G`/`0`/`$`/`{`/`}`/`p`)
 - **Enterable info floats** with `Esc` dismiss and scroll support
-- **CSV export** for rows and entire tables
 
 ## Keybindings
 
@@ -84,6 +90,33 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `U` | Undo all staged changes |
 | `a` | Apply all staged changes to DB |
 
+### Sort / Filter / Pagination
+
+| Key | Action |
+|-----|--------|
+| `s` | Toggle sort on column (ASC → DESC → off) |
+| `S` | Stack secondary sort on column |
+| `f` | Quick filter by cell value |
+| `<C-f>` | Freeform WHERE clause filter |
+| `F` | Clear all filters |
+| `]p` | Next page |
+| `[p` | Previous page |
+
+### FK Navigation
+
+| Key | Action |
+|-----|--------|
+| `gf` | Follow foreign key under cursor |
+| `<C-o>` | Go back in FK navigation stack |
+
+### Analysis & Export
+
+| Key | Action |
+|-----|--------|
+| `ga` | Aggregate selected cells (visual mode) |
+| `gS` | Column statistics popup |
+| `gE` | Export table (CSV, TSV, JSON, SQL INSERT, Markdown) |
+
 ### Inspection
 
 | Key | Action |
@@ -103,13 +136,17 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `q` | Close grip buffer |
 | `?` | Show help |
 
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `:GripExplain` | Render EXPLAIN plan for current query or given SQL |
+
 ## Requirements
 
 - **Neovim 0.10+**
 - **[vim-dadbod](https://github.com/tpope/vim-dadbod)**
-- **PostgreSQL** (`psql` client in PATH)
-
-> Currently PostgreSQL only. MySQL/SQLite planned.
+- **PostgreSQL** (`psql` client in PATH) and/or **SQLite** (`sqlite3` in PATH)
 
 ## Install
 
@@ -160,6 +197,8 @@ vim.keymap.set("n", "<leader>lg", "<cmd>Grip<cr>", { desc = "Open Grip grid" })
 | `:Grip` | Smart open: detects DBUI context or uses word under cursor |
 | `:Grip users` | Open a specific table |
 | `:Grip SELECT * FROM users WHERE active` | Run arbitrary SQL |
+| `:GripExplain` | Show EXPLAIN plan for current grid's query |
+| `:GripExplain SELECT ...` | Show EXPLAIN plan for arbitrary SQL |
 
 ### DBUI Integration
 
@@ -194,34 +233,43 @@ grip.open_smart()
 
 ## Architecture
 
-Six modules with strict boundaries:
+Eight modules with strict boundaries:
 
 ```
 init.lua    → Entry point. Parses args, wires callbacks, orchestrates modules.
 view.lua    → Buffer rendering, keymaps, highlights. One buffer per session.
 editor.lua  → Float cell editor. Minimal: one purpose, no state leaked.
 data.lua    → Immutable state transforms. All functions: state in, state out.
-db.lua      → I/O boundary. Only module that talks to PostgreSQL via psql.
+query.lua   → Pure query composition. Spec (value) → SQL string. No I/O.
+db.lua      → I/O boundary + adapter dispatch. Delegates to adapters by URL scheme.
 sql.lua     → Pure SQL generation. No DB calls, no state, pure string builders.
+adapters/   → Per-database implementations (postgresql.lua, sqlite.lua).
 ```
 
 Design principles:
 - **Immutable state**: `data.lua` never mutates. Every operation returns a new state table.
-- **I/O at the boundary**: Only `db.lua` runs shell commands. Everything else is pure.
-- **Pure SQL generation**: `sql.lua` builds SQL strings from data. Testable without a database.
+- **Query as value**: `query.lua` treats query specs as plain Lua tables composed by pure functions.
+- **I/O at the boundary**: Only `db.lua` and adapters run shell commands. Everything else is pure.
+- **Adapter pattern**: URL scheme → adapter module. Each adapter implements query, execute, get_primary_keys, get_column_info, get_foreign_keys, and explain.
 
 ## Testing
 
-Create the test database with pathological fixtures:
+### PostgreSQL
 
 ```bash
 createdb grip_test
 psql grip_test < tests/seed.sql
 ```
 
-Test tables cover: normal CRUD, composite PKs, JSON/JSONB, unicode (emoji, CJK, RTL), 15+ column wide tables, binary data, empty tables, all PostgreSQL types, and SQL injection attempts.
+### SQLite
 
-Open each table with `:Grip <table_name>` and verify rendering, editing, and edge cases.
+```bash
+sqlite3 tests/grip_test.db < tests/seed_sqlite.sql
+```
+
+Test tables cover: normal CRUD, composite PKs, JSON/JSONB, unicode, FK relationships (users → orders → order_items → products), 150+ rows for pagination, and SQL injection attempts.
+
+Open each table with `:Grip <table_name>` and verify rendering, editing, sort/filter/pagination, and FK navigation.
 
 ## Related
 
@@ -238,8 +286,14 @@ dadbod-grip is a **data editor**, not a viewer. The rest of the ecosystem displa
 | **Cell editing** | Yes | Yes | No | No | Yes (TUI) | No |
 | **Change staging** | Yes (visual) | Yes | No | No | No | No |
 | **SQL preview** | Yes (live) | No | No | No | No | No |
+| **Sort/filter** | Yes | No | No | No | Yes (TUI) | No |
+| **Pagination** | Yes | No | No | No | Yes (TUI) | No |
+| **FK navigation** | Yes | No | No | No | No | No |
+| **Column stats** | Yes | No | No | No | No | No |
+| **EXPLAIN viewer** | Yes | No | No | No | No | No |
+| **Export formats** | 5 formats | No | No | No | CSV | No |
 | **Grid view** | Unicode box | Markdown table | Columnar | Raw text | TUI grid | React table |
-| **Multi-DB** | PG only | PG only | Yes (Go) | Yes (dadbod) | 3 DBs | Yes (dadbod) |
+| **Multi-DB** | PG, SQLite | PG only | Yes (Go) | Yes (dadbod) | 3 DBs | Yes (dadbod) |
 | **Backend** | Pure Lua | Lua | Go binary | Vimscript | Go TUI | Go + React |
 | **Dependencies** | vim-dadbod | psql | None | vim-dadbod | lazysql | vim-dadbod |
 

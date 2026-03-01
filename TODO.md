@@ -30,28 +30,29 @@
   - [ ] File-as-table querying: `:Grip /path/to/data.parquet` (CSV, JSON, Parquet, Excel via DuckDB)
 - [ ] MySQL/MariaDB adapter (mysql CLI, information_schema)
 
-## v1.2.0 — Sort, Filter, Paginate
+## v1.2.0 — Sort, Filter, Paginate — Done
 
 Low complexity, high impact. Every desktop GUI has these; no Neovim plugin does.
 
-- [ ] Sort by column — `s` toggles ASC/DESC/off, re-runs query with ORDER BY
-- [ ] Stacked sort — `S` adds secondary sort column
-- [ ] Filter rows — `f` opens WHERE clause input, appends to base query
-- [ ] Quick filter — `ff` on a cell to filter by "column = this value"
-- [ ] Clear filter — `F` removes filter and refreshes
-- [ ] Pagination — `]p`/`[p` next/prev page, status line shows "Page 1 of N"
-- [ ] Search within grid — `/` to search loaded buffer text locally
+- [x] Sort by column — `s` toggles ASC/DESC/off, re-runs query with ORDER BY
+- [x] Stacked sort — `S` adds secondary sort column
+- [x] Quick filter — `f` on a cell to filter by "column = this value"
+- [x] Filter rows — `<C-f>` opens freeform WHERE clause input
+- [x] Clear filter — `F` removes filter and refreshes
+- [x] Pagination — `]p`/`[p` next/prev page, status line shows "Page 1 of N"
+- [x] Search within grid — `/` native vim search works on rendered buffer
+- [x] Query composition module (query.lua) — pure functions, spec → SQL
 
-## v1.3.0 — Foreign Key Navigation & Data Intelligence
+## v1.3.0 — Foreign Key Navigation & Data Intelligence — Done
 
 The single biggest gap in the Neovim database ecosystem. DataGrip, DBeaver, Postico, TablePlus all have FK navigation.
 
-- [ ] FK navigation — `gf` on a FK cell opens referenced row in new grid
-- [ ] FK metadata query per adapter (information_schema / PRAGMA foreign_key_list)
-- [ ] Navigation stack with `<C-o>` to go back, breadcrumb in status line
-- [ ] Aggregate on selection — visual select cells, show count/sum/avg/min/max
-- [ ] Column statistics — `gS` on a column for count, distinct, nulls, min/max, top values (validated by MotherDuck's Column Explorer)
-- [ ] Additional export formats — JSON, SQL INSERT, Markdown table (gE picker)
+- [x] FK navigation — `gf` on a FK cell opens referenced row in new grid
+- [x] FK metadata query per adapter (information_schema / PRAGMA foreign_key_list)
+- [x] Navigation stack with `<C-o>` to go back, breadcrumb in title bar
+- [x] Aggregate on selection — `ga` in visual mode shows count/sum/avg/min/max
+- [x] Column statistics — `gS` on a column for count, distinct, nulls, min/max, top values (validated by MotherDuck's Column Explorer)
+- [x] Additional export formats — `gE` picker: CSV, TSV, JSON, SQL INSERT, Markdown
 
 ## v1.4.0 — Grid Enhancements
 
@@ -65,7 +66,7 @@ The single biggest gap in the Neovim database ecosystem. DataGrip, DBeaver, Post
 
 ## v2.0.0 — Advanced Features
 
-- [ ] EXPLAIN plan viewer — `:GripExplain` renders query plan as color-coded tree
+- [x] EXPLAIN plan viewer — `:GripExplain` renders query plan as color-coded tree
 - [ ] Data diff — `:GripDiff` opens two grids side-by-side with diff highlighting
 - [ ] Transaction wrapper — BEGIN/COMMIT/ROLLBACK around staged changes
 - [ ] Telescope/fzf picker for tables and columns
