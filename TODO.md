@@ -27,7 +27,7 @@ cell formatting, batch edit, visual copy/paste, multi-level undo (50 deep).
 EXPLAIN viewer, transaction wrapper, schema browser (go), table picker (gT),
 query pad (gQ), saved queries, connection profiles, data diff (gD).
 
-### v3.0.0 - Schema Operations (DDL)
+### v2.1.0 - Schema Operations (DDL)
 Table properties (gI), column rename (R), column add/drop (+/x), drop table,
 create table.
 
@@ -57,4 +57,3 @@ release. Roughly ordered by expected impact.
 - [ ] Row duplication keymap (yy-style for grid rows)
 - [ ] Inline column resize with +/- on header
 - [ ] Export to clipboard as markdown table
-- [ ] Telescope integration for saved queries picker

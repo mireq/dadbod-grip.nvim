@@ -95,14 +95,80 @@ function M.delete(name)
   end
 end
 
---- Open a picker to load a saved query. Calls callback(content, name).
-function M.pick(callback)
-  local queries = M.list()
-  if #queries == 0 then
-    vim.notify("Grip: no saved queries", vim.log.levels.WARN)
-    return
+--- Telescope picker with SQL file preview.
+local function telescope_pick(queries, callback)
+  local pickers = require("telescope.pickers")
+  local finders = require("telescope.finders")
+  local conf = require("telescope.config").values
+  local actions = require("telescope.actions")
+  local action_state = require("telescope.actions.state")
+  local previewers = require("telescope.previewers")
+
+  pickers.new({}, {
+    prompt_title = "Grip Saved Queries",
+    finder = finders.new_table({
+      results = queries,
+      entry_maker = function(entry)
+        return {
+          value = entry,
+          display = entry.name,
+          ordinal = entry.name,
+          path = entry.path,
+        }
+      end,
+    }),
+    sorter = conf.generic_sorter({}),
+    previewer = previewers.new_buffer_previewer({
+      title = "SQL Preview",
+      define_preview = function(self, entry)
+        local lines = vim.fn.readfile(entry.value.path)
+        vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, lines)
+        vim.bo[self.state.bufnr].filetype = "sql"
+      end,
+    }),
+    attach_mappings = function(prompt_bufnr)
+      actions.select_default:replace(function()
+        local entry = action_state.get_selected_entry()
+        actions.close(prompt_bufnr)
+        if entry then
+          local content = table.concat(vim.fn.readfile(entry.value.path), "\n")
+          callback(content, entry.value.name)
+        end
+      end)
+      return true
+    end,
+  }):find()
+end
+
+--- fzf-lua picker.
+local function fzf_pick(queries, callback)
+  local fzf = require("fzf-lua")
+  local names = {}
+  local by_name = {}
+  for _, q in ipairs(queries) do
+    table.insert(names, q.name)
+    by_name[q.name] = q
   end
 
+  fzf.fzf_exec(names, {
+    prompt = "Grip Queries> ",
+    previewer = false,
+    actions = {
+      ["default"] = function(selected)
+        if selected and selected[1] then
+          local q = by_name[selected[1]]
+          if q then
+            local content = table.concat(vim.fn.readfile(q.path), "\n")
+            callback(content, q.name)
+          end
+        end
+      end,
+    },
+  })
+end
+
+--- Native vim.ui.select fallback.
+local function native_pick(queries, callback)
   local labels = {}
   for _, q in ipairs(queries) do
     table.insert(labels, q.name)
@@ -114,6 +180,28 @@ function M.pick(callback)
     local content = table.concat(vim.fn.readfile(q.path), "\n")
     callback(content, q.name)
   end)
+end
+
+--- Open a picker to load a saved query. Calls callback(content, name).
+--- Tries telescope -> fzf-lua -> vim.ui.select.
+function M.pick(callback)
+  local queries = M.list()
+  if #queries == 0 then
+    vim.notify("Grip: no saved queries", vim.log.levels.WARN)
+    return
+  end
+
+  local has_telescope = pcall(require, "telescope")
+  if has_telescope then
+    return telescope_pick(queries, callback)
+  end
+
+  local has_fzf = pcall(require, "fzf-lua")
+  if has_fzf then
+    return fzf_pick(queries, callback)
+  end
+
+  return native_pick(queries, callback)
 end
 
 return M
