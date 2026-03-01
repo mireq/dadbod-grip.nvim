@@ -120,9 +120,11 @@ Full table metadata: columns, types, PKs, FKs, indexes, row estimates, and size.
 - **Sort, filter, and pagination** using `s`/`S` to sort, `f`/`<C-f>`/`F` to filter, `gp`/`gP` for saved filter presets, and `]p`/`[p` to page.
 - **Foreign key navigation** via `gf` to follow a FK to its referenced row, and `<C-o>` to go back.
 - **Query history** via `gh` or `:GripHistory` browsing all executed queries with Telescope search, stored in `.grip/history.jsonl`.
+- **Data profiling** via `gR` or `:GripProfile` showing sparkline distributions, completeness, cardinality, and top values per column.
 - **Column statistics** via `gS` showing count, distinct, nulls, min/max, and top values.
 - **Aggregate on selection** via `ga` in visual mode showing count/sum/avg/min/max.
-- **EXPLAIN plan viewer** via `:GripExplain` rendering color-coded query plans.
+- **Query Doctor** via `:GripExplain` translating EXPLAIN plans into plain-English health checks with cost bars and index suggestions.
+- **AI SQL generation** via `gA` or `:GripAsk` turning natural language into SQL queries using Anthropic, OpenAI, Gemini, or local Ollama.
 
 ### Schema and Workflow
 - **Schema browser** via `:GripSchema` or `go` showing a sidebar tree with columns, types, and PK/FK markers.
@@ -236,7 +238,8 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 |-----|--------|
 | `ga` | Aggregate selected cells (visual mode) |
 | `gS` | Column statistics popup |
-| `gx` | Explain current query plan |
+| `gR` | Table profile (sparkline distributions) |
+| `gx` | Query Doctor (plain-English EXPLAIN) |
 | `gD` | Diff against another table |
 | `gh` | Query history browser |
 | `gE` | Export table (CSV, TSV, JSON, SQL INSERT, Markdown, Grip Table) |
@@ -266,6 +269,7 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `gT` | Pick table (fuzzy finder) |
 | `gQ` | Open query pad (pre-filled with current query) |
 | `gh` | Query history browser |
+| `gA` | AI SQL generation (natural language) |
 
 ### Advanced
 
@@ -297,7 +301,9 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `:GripLoad [name]` | Load a saved query (picker if no name) |
 | `:GripHistory` | Browse query history (telescope/fzf-lua/native) |
 | `:GripConnect [url]` | Switch database connection (picker if no arg) |
-| `:GripExplain [sql]` | Render EXPLAIN plan for current or given query |
+| `:GripExplain [sql]` | Query Doctor: plain-English EXPLAIN with tips |
+| `:GripProfile [table]` | Profile columns with sparkline distributions |
+| `:GripAsk [question]` | AI SQL generation from natural language |
 | `:GripProperties [table]` | Show table properties (columns, indexes, stats) |
 | `:GripRename old new` | Rename a column in the current table |
 | `:GripCreate` | Create a new table interactively |
@@ -365,6 +371,21 @@ require("dadbod-grip").setup({
 })
 ```
 
+AI SQL generation (optional):
+
+```lua
+require("dadbod-grip").setup({
+  ai = {
+    provider = nil,       -- nil = auto-detect, or "anthropic"/"openai"/"gemini"/"ollama"
+    model = nil,          -- nil = provider default
+    api_key = nil,        -- nil = env var, "env:VAR", "cmd:op read ...", or direct string
+    base_url = nil,       -- override for ollama or proxy
+  }
+})
+```
+
+Provider auto-detection priority: `ANTHROPIC_API_KEY` > `OPENAI_API_KEY` > `GEMINI_API_KEY` > ollama (local). Explicit `provider` setting always wins.
+
 No default keymaps are set outside the grip buffer. Add one if you want:
 
 ```lua
@@ -419,7 +440,7 @@ grip.open_smart()
 
 ## Architecture
 
-Eighteen modules with strict boundaries:
+Twenty modules with strict boundaries:
 
 ```
 init.lua        → Entry point. Commands, callbacks, orchestration.
@@ -439,6 +460,8 @@ properties.lua  → Table properties float. Columns, indexes, stats, DDL keymaps
 ddl.lua         → Schema operations. Rename, add/drop column, create/drop table.
 diff.lua        → Data diff engine. PK-matched row comparison with color coding.
 history.lua     → Query history. JSONL storage, recording, 3-tier picker.
+profile.lua     → Data profiling. Sparkline distributions, column stats.
+ai.lua          → AI SQL generation. Multi-provider, schema context assembly.
 adapters/       → Per-database: postgresql, sqlite, mysql, duckdb.
 ```
 

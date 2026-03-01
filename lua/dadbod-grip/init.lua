@@ -221,8 +221,10 @@ function M.open(arg, url, opts)
 
   local query_sql = query.build_sql(spec)
 
-  -- Run query
+  -- Run query with timing
+  local t_start = vim.uv.hrtime()
   local result, qerr = db.query(query_sql, conn)
+  local elapsed_ms = math.floor((vim.uv.hrtime() - t_start) / 1e6)
   if not result then
     vim.notify("Grip: " .. (qerr or "query failed"), vim.log.levels.ERROR)
     return
@@ -239,14 +241,15 @@ function M.open(arg, url, opts)
   result.table_name = table_name_arg
   result.url = conn
   result.sql = query_sql
+  result.elapsed_ms = elapsed_ms
 
   local history = require("dadbod-grip.history")
-  history.record({ sql = query_sql, url = conn, table_name = table_name_arg, type = "query" })
+  history.record({ sql = query_sql, url = conn, table_name = table_name_arg, type = "query", elapsed_ms = elapsed_ms })
 
   local state = data.new(result)
 
   -- Open the view
-  local view_opts = vim.tbl_extend("force", { max_col_width = OPTS.max_col_width }, opts or {})
+  local view_opts = vim.tbl_extend("force", { max_col_width = OPTS.max_col_width, elapsed_ms = elapsed_ms }, opts or {})
   local bufnr = view.open(state, conn, query_sql, view_opts)
 
   -- Store query spec and run initial count for pagination
@@ -437,6 +440,11 @@ function M.setup(opts)
   OPTS.max_col_width = opts.max_col_width or 40
   OPTS.timeout      = opts.timeout      or 10000
 
+  -- AI configuration (optional)
+  if opts.ai then
+    require("dadbod-grip.ai").setup(opts.ai)
+  end
+
   -- Register :Grip command
   vim.api.nvim_create_user_command("Grip", function(cmd_opts)
     local arg = vim.trim(cmd_opts.args or "")
@@ -445,6 +453,212 @@ function M.setup(opts)
     nargs = "?",
     desc  = "Open dadbod-grip result grid for table or query",
   })
+
+  -- ── Query Doctor: EXPLAIN parsing and rendering ──────────────────────────
+
+  --- Detect adapter type from connection URL.
+  local function detect_adapter(url)
+    if not url then return "unknown" end
+    local u = url:lower()
+    if u:match("^postgres") then return "postgresql" end
+    if u:match("^mysql") or u:match("^mariadb") then return "mysql" end
+    if u:match("^duckdb") then return "duckdb" end
+    if u:match("^sqlite") then return "sqlite" end
+    return "unknown"
+  end
+
+  --- Parse EXPLAIN output into structured nodes.
+  function M._parse_explain_nodes(lines, adapter_type)
+    local nodes = {}
+    for i, line in ipairs(lines) do
+      local node = { text = line, cost = nil, rows = nil, time = nil, indent = 0, operation = nil }
+
+      -- Detect indent level
+      node.indent = #(line:match("^(%s*)") or "")
+
+      if adapter_type == "postgresql" then
+        -- cost=0.00..35.50
+        local cost_end = line:match("cost=[%d.]+%.%.([%d.]+)")
+        if cost_end then node.cost = tonumber(cost_end) end
+        local rows_val = line:match("rows=(%d+)")
+        if rows_val then node.rows = tonumber(rows_val) end
+        local actual_time = line:match("actual time=[%d.]+%.%.([%d.]+)")
+        if actual_time then node.time = tonumber(actual_time) end
+      elseif adapter_type == "mysql" then
+        local cost_val = line:match("cost=([%d.]+)")
+        if cost_val then node.cost = tonumber(cost_val) end
+        local rows_val = line:match("rows=(%d+)")
+        if rows_val then node.rows = tonumber(rows_val) end
+      elseif adapter_type == "duckdb" then
+        local card = line:match("Estimated Cardinality:%s*(%d+)")
+        if card then node.cost = tonumber(card) end
+      end
+
+      -- Detect operation type
+      local lt = line:lower()
+      if lt:match("seq scan") or lt:match("full scan") or lt:match("table scan") or lt:match("scan table")
+        or lt:match("^%s*scan ") then
+        node.operation = "seq_scan"
+      elseif lt:match("index scan") or lt:match("index lookup") or lt:match("using index")
+        or lt:match("search.*using") then
+        node.operation = "index_scan"
+      elseif lt:match("bitmap") then
+        node.operation = "bitmap_scan"
+      elseif lt:match("nested loop") then
+        node.operation = "nested_loop"
+      elseif lt:match("hash join") or lt:match("hash match") then
+        node.operation = "hash_join"
+      elseif lt:match("sort") or lt:match("filesort") then
+        node.operation = "sort"
+      elseif lt:match("filter") then
+        node.operation = "filter"
+      elseif lt:match("aggregate") or lt:match("group") then
+        node.operation = "aggregate"
+      elseif lt:match("limit") then
+        node.operation = "limit"
+      end
+
+      table.insert(nodes, node)
+    end
+    return nodes
+  end
+
+  --- Translation table: operation -> plain English description + severity rules.
+  local TRANSLATIONS = {
+    seq_scan     = { label = "Reading every row in %s", tip = "Consider adding an index on the filtered column", severity = "slow" },
+    index_scan   = { label = "Looking up by index on %s", tip = nil, severity = "ok" },
+    bitmap_scan  = { label = "Partial index scan on %s", tip = nil, severity = "ok" },
+    nested_loop  = { label = "Comparing every row pair (nested loop)", tip = "Large nested loop; check if a hash join would help", severity = "slow" },
+    hash_join    = { label = "Matching rows by hash", tip = nil, severity = "ok" },
+    sort         = { label = "Sorting results (no index)", tip = "Consider a covering index to avoid this sort", severity = "warn" },
+    filter       = { label = "Filtering rows before output", tip = "Index on filter column may help", severity = "warn" },
+    aggregate    = { label = "Computing aggregate (GROUP BY)", tip = nil, severity = "ok" },
+    limit        = { label = "Limiting results", tip = nil, severity = "ok" },
+  }
+
+  --- Render parsed nodes as plain-English Query Doctor output.
+  function M._render_query_doctor(nodes, adapter_type)
+    local display_lines = {}
+    local hl_marks = {}
+
+    local function add(s) table.insert(display_lines, s) end
+    local function mark(hl)
+      table.insert(hl_marks, { line = #display_lines, hl = hl })
+    end
+
+    add("  Query Health")
+    add("  " .. string.rep("\xe2\x94\x80", 28))
+    mark("GripProfileHeader")
+    add("")
+
+    -- Find max cost for bar sizing
+    local max_cost = 0
+    local total_cost = 0
+    local root_rows = nil
+    for _, n in ipairs(nodes) do
+      if n.cost then
+        max_cost = math.max(max_cost, n.cost)
+        total_cost = total_cost + n.cost
+      end
+      if not root_rows and n.rows then root_rows = n.rows end
+    end
+
+    -- Render each node with an operation
+    local slow_count = 0
+    local has_content = false
+
+    for _, n in ipairs(nodes) do
+      if n.operation then
+        local tr = TRANSLATIONS[n.operation]
+        if tr then
+          has_content = true
+          -- Extract table name from text
+          local tbl_name = n.text:match("on%s+(%S+)") or n.text:match("table%s+(%S+)") or ""
+          tbl_name = tbl_name:gsub("[%(%)]", "")
+
+          -- Determine actual severity
+          local sev = tr.severity
+          if sev == "slow" and n.rows and n.rows < 1000 then sev = "ok" end
+          if sev == "warn" and n.cost and n.cost < 500 then sev = "ok" end
+          if n.operation == "nested_loop" and (not n.rows or n.rows < 1000) then sev = "ok" end
+
+          -- Build label
+          local label = tr.label
+          if label:match("%%s") then
+            label = string.format(label, tbl_name ~= "" and tbl_name or "table")
+          end
+
+          -- Severity prefix
+          local prefix
+          if sev == "slow" then
+            prefix = "  SLOW"
+            slow_count = slow_count + 1
+          elseif sev == "warn" then
+            prefix = "  WARN"
+          else
+            prefix = "  OK"
+          end
+
+          add(prefix .. ": " .. label)
+          if sev == "slow" then mark("DiagnosticError")
+          elseif sev == "warn" then mark("DiagnosticWarn")
+          else mark("DiagnosticOk")
+          end
+
+          -- Cost bar
+          if n.cost and max_cost > 0 then
+            local bar_w = math.max(1, math.floor((n.cost / max_cost) * 20))
+            local bar = string.rep("\xe2\x96\x88", bar_w) .. string.rep("\xe2\x96\x91", 20 - bar_w)
+            local pct = math.floor(n.cost / max_cost * 100)
+            local bar_label = n.cost == max_cost and "  (bottleneck)" or "  (fast)"
+            if sev == "warn" then bar_label = "" end
+            add("  " .. bar .. "  " .. pct .. "%" .. bar_label)
+          end
+
+          -- Description with row count
+          if n.rows then
+            add("  This processes ~" .. n.rows .. " rows.")
+          end
+
+          -- Tip
+          if sev ~= "ok" and tr.tip then
+            add("  Tip: " .. tr.tip)
+          end
+
+          add("")
+        end
+      end
+    end
+
+    -- If no operations detected, show raw plan
+    if not has_content then
+      for _, n in ipairs(nodes) do
+        add("  " .. n.text)
+      end
+      add("")
+    end
+
+    -- Summary
+    add("  " .. string.rep("\xe2\x94\x80", 28))
+    local summary_parts = {}
+    if slow_count > 0 then
+      table.insert(summary_parts, slow_count .. " slow operation(s) found")
+    else
+      table.insert(summary_parts, "No major issues detected")
+    end
+    if total_cost > 0 then
+      table.insert(summary_parts, "Est. cost: " .. string.format("%.1f", total_cost))
+    end
+    if root_rows then
+      table.insert(summary_parts, "Est. rows: " .. root_rows)
+    end
+    add("  " .. table.concat(summary_parts, "  |  "))
+    if slow_count > 0 then mark("DiagnosticError")
+    else mark("DiagnosticOk")
+    end
+
+    return display_lines, hl_marks
+  end
 
   -- Register :GripExplain command
   vim.api.nvim_create_user_command("GripExplain", function(cmd_opts)
@@ -487,16 +701,19 @@ function M.setup(opts)
     local hist = require("dadbod-grip.history")
     hist.record({ sql = arg, url = conn, type = "explain" })
 
-    -- Render in a float with color coding
-    local explain_lines = result.lines
+    -- Parse and render as Query Doctor
+    local adapter_type = detect_adapter(conn)
+    local nodes = M._parse_explain_nodes(result.lines, adapter_type)
+    local doctor_lines, doctor_marks = M._render_query_doctor(nodes, adapter_type)
+
     local explain_buf = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_buf_set_lines(explain_buf, 0, -1, false, explain_lines)
-    vim.api.nvim_set_option_value("filetype", "sql", { buf = explain_buf })
+    vim.api.nvim_buf_set_lines(explain_buf, 0, -1, false, doctor_lines)
+    vim.api.nvim_set_option_value("modifiable", false, { buf = explain_buf })
 
     local max_w = 0
-    for _, l in ipairs(explain_lines) do max_w = math.max(max_w, #l) end
+    for _, l in ipairs(doctor_lines) do max_w = math.max(max_w, vim.fn.strdisplaywidth(l)) end
     local width = math.min(math.max(max_w + 4, 40), vim.o.columns - 10)
-    local height = math.min(#explain_lines, math.floor(vim.o.lines * 0.7))
+    local height = math.min(#doctor_lines, math.floor(vim.o.lines * 0.7))
 
     local win = vim.api.nvim_open_win(explain_buf, true, {
       relative = "editor",
@@ -506,22 +723,17 @@ function M.setup(opts)
       height = height,
       style = "minimal",
       border = "rounded",
-      title = " EXPLAIN Plan ",
+      title = " Query Health ",
       title_pos = "center",
     })
 
-    -- Color code cost lines (green for low, yellow for medium, red for high)
+    -- Apply highlights
     local explain_ns = vim.api.nvim_create_namespace("grip_explain")
-    for i, line in ipairs(explain_lines) do
-      local cost = line:match("cost=([%d.]+)")
-      if cost then
-        local c = tonumber(cost) or 0
-        local hl = c < 100 and "DiagnosticOk" or c < 1000 and "DiagnosticWarn" or "DiagnosticError"
-        vim.api.nvim_buf_set_extmark(explain_buf, explain_ns, i - 1, 0, {
-          end_col = #line,
-          hl_group = hl,
-        })
-      end
+    for _, m in ipairs(doctor_marks) do
+      pcall(vim.api.nvim_buf_set_extmark, explain_buf, explain_ns, m.line - 1, 0, {
+        end_col = #(doctor_lines[m.line] or ""),
+        hl_group = m.hl,
+      })
     end
 
     -- Close keymaps
@@ -619,6 +831,60 @@ function M.setup(opts)
   end, {
     nargs = 0,
     desc  = "Browse query history",
+  })
+
+  -- Register :GripProfile command
+  vim.api.nvim_create_user_command("GripProfile", function(cmd_opts)
+    local arg = vim.trim(cmd_opts.args or "")
+    local tbl = arg
+    if tbl == "" then
+      local bufnr_p = vim.api.nvim_get_current_buf()
+      local session_p = view._sessions[bufnr_p]
+      if session_p and session_p.state.table_name then
+        tbl = session_p.state.table_name
+      end
+    end
+    if tbl == "" then
+      vim.notify("GripProfile: provide a table name or run from a Grip buffer", vim.log.levels.WARN)
+      return
+    end
+    local conn = db.get_url()
+    if not conn then
+      vim.notify("GripProfile: no database connection", vim.log.levels.WARN)
+      return
+    end
+    local profile = require("dadbod-grip.profile")
+    profile.open(tbl, conn)
+  end, {
+    nargs = "?",
+    desc  = "Profile table columns with sparkline distributions",
+  })
+
+  -- Register :GripAsk command
+  vim.api.nvim_create_user_command("GripAsk", function(cmd_opts)
+    local question = vim.trim(cmd_opts.args or "")
+    local conn = db.get_url()
+    if not conn then
+      vim.notify("GripAsk: no database connection", vim.log.levels.WARN)
+      return
+    end
+    local ai = require("dadbod-grip.ai")
+    if question ~= "" then
+      vim.notify("Generating SQL...", vim.log.levels.INFO)
+      ai.generate_sql(question, conn, function(result_sql, err)
+        if err then
+          vim.notify("GripAsk: " .. err, vim.log.levels.ERROR)
+          return
+        end
+        local query_pad = require("dadbod-grip.query_pad")
+        query_pad.open(conn, { initial_sql = result_sql })
+      end)
+    else
+      ai.ask(conn)
+    end
+  end, {
+    nargs = "?",
+    desc  = "Generate SQL from natural language",
   })
 
   -- Register :GripDiff command

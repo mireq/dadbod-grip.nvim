@@ -462,6 +462,7 @@ local function build_render(session, opts)
     table.insert(status_parts, #st.rows .. " rows")
   end
 
+  if session.elapsed_ms then table.insert(status_parts, session.elapsed_ms .. "ms") end
   if staged_count > 0 then table.insert(status_parts, staged_count .. " staged") end
   if st.readonly then table.insert(status_parts, "read-only") end
   if pin > 0 then table.insert(status_parts, pin .. " pinned") end
@@ -708,6 +709,7 @@ function M.open(state, url, query_sql, opts)
     query_sql = query_sql,
     opts = opts or {},
     hidden_columns = {},
+    elapsed_ms = opts and opts.elapsed_ms or nil,
   }
 
   -- Open in existing window (reuse_win) or a new horizontal split below
@@ -2124,6 +2126,17 @@ function M._setup_keymaps(bufnr)
     open_info_float(grip_win, info, { title = " Column Stats " })
   end, "Column statistics")
 
+  -- gR: table profile report
+  map("gR", function()
+    local session_pr = M._sessions[bufnr]
+    if not session_pr or not session_pr.state.table_name then
+      vim.notify("Profile requires a table name", vim.log.levels.INFO)
+      return
+    end
+    local profile = require("dadbod-grip.profile")
+    profile.open(session_pr.state.table_name, session_pr.state.url)
+  end, "Table profile report")
+
   -- gE: export in multiple formats
   map("gE", function()
     local session_e = M._sessions[bufnr]
@@ -2347,6 +2360,21 @@ function M._setup_keymaps(bufnr)
     end)
   end, "Query history")
 
+  -- gA: AI SQL generation
+  map("gA", function()
+    local session_ai = M._sessions[bufnr]
+    local s_url = session_ai and session_ai.state.url
+    if not s_url then
+      s_url = require("dadbod-grip.db").get_url()
+    end
+    if not s_url then
+      vim.notify("No database connection for AI", vim.log.levels.WARN)
+      return
+    end
+    local ai = require("dadbod-grip.ai")
+    ai.ask(s_url)
+  end, "AI SQL generation")
+
   -- ?: help popup
   map("?", function()
     local grip_win = vim.api.nvim_get_current_win()  -- save for restore on close
@@ -2403,6 +2431,7 @@ function M._setup_keymaps(bufnr)
       "  Analysis & Export",
       "  ga        Aggregate selected cells (visual mode)",
       "  gS        Column statistics popup",
+      "  gR        Table profile (sparkline distributions)",
       "  gx        Explain current query plan",
       "  gD        Diff against another table",
       "  gE        Export (CSV, TSV, JSON, SQL, Markdown, Grip Table)",
@@ -2412,6 +2441,7 @@ function M._setup_keymaps(bufnr)
       "  gT        Pick table (fuzzy finder)",
       "  gQ        Open query pad",
       "  gh        Query history browser",
+      "  gA        AI SQL generation",
       "",
       "  Actions",
       "  r         Refresh (re-run query)",

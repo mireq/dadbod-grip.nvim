@@ -44,8 +44,20 @@ Compact diff mode for narrow terminals (<120 cols). Stacked key-value layout
 showing PK context + changed columns with old -> new format. Auto-detects
 terminal width, toggle with gv.
 
+### v2.4.0 - Data Intelligence
+Sparkline data profiling (gR, :GripProfile) with per-column completeness,
+cardinality, min/max, and Unicode distribution charts.
+
+Query Doctor: plain-English EXPLAIN with severity levels, cost bars, and
+actionable index suggestions. Replaces raw EXPLAIN output.
+
+AI SQL generation (gA, :GripAsk) with multi-provider support (Anthropic,
+OpenAI, Gemini, Ollama). Schema context auto-assembled from metadata.
+
+Query execution timer in statusline and history.
+
 ### Ongoing
-- 279 unit tests across 11 spec files
+- 328 unit tests across 14 spec files
 - Adapter-specific type_zoo seeds (PG: 34 types, MySQL: 28 types, DuckDB: 34 types, SQLite: 26 types + coercion row)
 - Committed SQLite test DB (tests/seed_sqlite.db) for zero-setup testing
 - Structural sharing in data.lua, sampled column widths
@@ -61,6 +73,12 @@ release. Roughly ordered by expected impact.
 ### High Value -- Features
 - [x] Query history with Telescope search (gh, :GripHistory) -- v2.3.0
 - [x] Compact diff mode for narrow terminals (gv toggle) -- v2.3.0
+- [x] Sparkline data profiling (gR, :GripProfile) -- v2.4.0
+- [x] Query Doctor plain-English EXPLAIN -- v2.4.0
+- [x] AI SQL generation (gA, :GripAsk) -- v2.4.0
+- [x] Query execution timer -- v2.4.0
+- [ ] Live watch mode (`:GripWatch`, re-execute on interval, highlight changed cells)
+- [ ] DuckDB cross-database federation (`:GripAttach`, ATTACH pg/mysql/sqlite, cross-DB JOINs)
 - [ ] Generate sync SQL from diff (make table A match table B, emit INSERT/UPDATE/DELETE migration from `gD` output)
 - [ ] Import from clipboard/pipe (`gI` in empty grid or `:GripImport`, detect CSV/JSON/TSV, preview before INSERT, map columns)
 - [ ] Row duplication keymap (`yy`-style: duplicate current row as new INSERT with PK cleared)

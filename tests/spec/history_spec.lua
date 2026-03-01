@@ -243,6 +243,24 @@ test("round-trip: record then list returns same data", function()
   end)
 end)
 
+-- ── elapsed_ms ────────────────────────────────────────────────────────────────
+
+test("record: stores elapsed_ms field", function()
+  with_mock(function()
+    history.record({ sql = "SELECT 1", url = "sqlite:x.db", elapsed_ms = 42 })
+    eq(mock_store[1].elapsed_ms, 42, "elapsed_ms stored")
+  end)
+end)
+
+test("record: elapsed_ms preserved through dedup", function()
+  with_mock(function()
+    mock_store = {{ sql = "SELECT 1", url = "sqlite:x.db", ts = 1000, type = "query", elapsed_ms = 100 }}
+    history.record({ sql = "SELECT 1", url = "sqlite:x.db", elapsed_ms = 50 })
+    eq(#mock_store, 1, "still one entry")
+    eq(mock_store[1].elapsed_ms, 50, "elapsed_ms updated to latest")
+  end)
+end)
+
 -- ── summary ─────────────────────────────────────────────────────────────────
 
 print(string.format("\nhistory_spec: %d passed, %d failed", pass, fail))

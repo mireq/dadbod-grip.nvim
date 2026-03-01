@@ -77,6 +77,7 @@ function M.record(opts)
     ["table"] = opts.table_name,
     ts = os.time(),
     type = opts.type or "query",
+    elapsed_ms = opts.elapsed_ms,
   }
 
   local all = M._read_all()
@@ -86,6 +87,7 @@ function M.record(opts)
     local last = all[#all]
     if last.sql == entry.sql and last.url == entry.url then
       all[#all].ts = entry.ts
+      all[#all].elapsed_ms = entry.elapsed_ms
       M._write_all(all)
       return
     end
@@ -138,10 +140,11 @@ local function telescope_pick(entries, callback)
       results = entries,
       entry_maker = function(entry)
         local time_str = os.date("%Y-%m-%d %H:%M", entry.ts)
+        local ms_str = entry.elapsed_ms and (entry.elapsed_ms .. "ms  ") or ""
         local short_sql = entry.sql:sub(1, 60):gsub("\n", " ")
         return {
           value = entry,
-          display = time_str .. "  " .. short_sql,
+          display = time_str .. "  " .. ms_str .. short_sql,
           ordinal = entry.sql .. " " .. (entry["table"] or ""),
         }
       end,
@@ -180,7 +183,8 @@ local function fzf_pick(entries, callback)
   local by_idx = {}
   for i, e in ipairs(entries) do
     local time_str = os.date("%Y-%m-%d %H:%M", e.ts)
-    local label = time_str .. "  " .. e.sql:sub(1, 60):gsub("\n", " ")
+    local ms_str = e.elapsed_ms and (e.elapsed_ms .. "ms  ") or ""
+    local label = time_str .. "  " .. ms_str .. e.sql:sub(1, 60):gsub("\n", " ")
     table.insert(labels, label)
     by_idx[label] = e
   end
@@ -203,7 +207,8 @@ local function native_pick(entries, callback)
   local labels = {}
   for _, e in ipairs(entries) do
     local time_str = os.date("%Y-%m-%d %H:%M", e.ts)
-    table.insert(labels, time_str .. "  " .. e.sql:sub(1, 50):gsub("\n", " "))
+    local ms_str = e.elapsed_ms and (e.elapsed_ms .. "ms  ") or ""
+    table.insert(labels, time_str .. "  " .. ms_str .. e.sql:sub(1, 50):gsub("\n", " "))
   end
 
   vim.ui.select(labels, { prompt = "Query History:" }, function(_, idx)

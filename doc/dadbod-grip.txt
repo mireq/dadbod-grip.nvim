@@ -150,14 +150,32 @@ All commands are global and available after the plugin loads.
 
                                                               *:GripExplain*
 :GripExplain [sql]
-  Render EXPLAIN plan for the current query or a given SQL string.
-  Color-codes cost levels: green (low), yellow (medium), red (high).
+  Query Doctor: translates EXPLAIN plans into plain-English health
+  checks. Shows severity (SLOW/WARN/OK), proportional cost bars,
+  and actionable suggestions (e.g. "add an index on the filtered
+  column"). Works across PostgreSQL, MySQL, DuckDB, and SQLite.
 
                                                           *:GripProperties*
 :GripProperties [table]
   Show full table properties in a floating window. Includes columns with
   types, primary keys, foreign keys, indexes, row estimate, and table size.
   Uses the current grip table if no argument is provided.
+
+                                                              *:GripProfile*
+:GripProfile [table]
+  Open a data profiling report showing per-column statistics with Unicode
+  sparkline distributions. Shows completeness, cardinality, min/max, and
+  top values. Adapts to narrow terminals with a stacked layout.
+
+                                                                 *:GripAsk*
+:GripAsk [question]
+  Generate SQL from a natural language question using AI. Schema context
+  is auto-assembled from database metadata. Result appears in the query
+  pad for review before execution.
+
+  Providers: Anthropic, OpenAI, Gemini, Ollama (local).
+  Auto-detects from env vars: ANTHROPIC_API_KEY > OPENAI_API_KEY >
+  GEMINI_API_KEY > ollama fallback. Override with setup({ai={...}}).
 
                                                               *:GripHistory*
 :GripHistory
@@ -252,8 +270,10 @@ ANALYSIS AND EXPORT ~
   gS              Column statistics popup
                   Shows count, distinct, nulls, min/max, top values
   gx              Explain current query plan
+  gR              Table profile (sparkline distributions)
   gD              Diff current table against another table
   gh              Query history browser
+  gA              AI SQL generation (natural language)
   gE              Export table in 6 formats (see |grip-export|)
 
 INSPECTION ~
