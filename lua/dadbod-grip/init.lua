@@ -619,8 +619,8 @@ function M.setup(opts)
     ddl_mod.create_table(url, function()
       -- Refresh schema browser if open
       local schema_mod = require("dadbod-grip.schema")
-      if schema_mod._is_open and schema_mod._is_open() then
-        schema_mod.refresh()
+      if schema_mod.is_open() then
+        schema_mod.refresh(url)
       end
     end)
   end, {
@@ -650,8 +650,8 @@ function M.setup(opts)
     local ddl_mod = require("dadbod-grip.ddl")
     ddl_mod.drop_table(table_name, url, function()
       local schema_mod = require("dadbod-grip.schema")
-      if schema_mod._is_open and schema_mod._is_open() then
-        schema_mod.refresh()
+      if schema_mod.is_open() then
+        schema_mod.refresh(url)
       end
     end)
   end, {

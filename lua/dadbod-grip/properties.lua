@@ -225,6 +225,7 @@ function M.open(table_name, url, grip_win)
     border = "rounded",
     title = " Table Properties ",
     title_pos = "center",
+    zindex = 50,
   })
 
   -- Apply highlights
@@ -294,8 +295,8 @@ function M.open(table_name, url, grip_win)
     end)
   end, { buffer = popup_buf })
 
-  -- - (minus): drop column under cursor
-  vim.keymap.set("n", "-", function()
+  -- x: drop column under cursor
+  vim.keymap.set("n", "x", function()
     local col_name = cursor_column()
     if not col_name then
       vim.notify("Move cursor to a column row", vim.log.levels.INFO)

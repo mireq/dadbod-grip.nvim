@@ -440,7 +440,7 @@ keys, indexes, estimated row count, and table size.
 Properties view keymaps:
   R               Rename column under cursor
   +               Add new column (prompts for name, type, default)
-  -               Drop column under cursor (typed confirmation)
+  x               Drop column under cursor (typed confirmation)
   gI              Refresh properties
   q / <Esc>       Close
 

@@ -18,6 +18,7 @@ local function confirm_ddl(title, ddl_sql, callback)
 
   local popup_buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_lines(popup_buf, 0, -1, false, lines)
+  vim.api.nvim_set_option_value("modifiable", false, { buf = popup_buf })
 
   local max_w = 0
   for _, l in ipairs(lines) do max_w = math.max(max_w, vim.fn.strdisplaywidth(l)) end
@@ -34,6 +35,7 @@ local function confirm_ddl(title, ddl_sql, callback)
     border = "rounded",
     title = " " .. title .. " ",
     title_pos = "center",
+    zindex = 60,
   })
 
   local function close()
@@ -62,15 +64,17 @@ local function destructive_confirm(title, ddl_sql, confirm_word, callback)
     table.insert(lines, "  " .. line)
   end
   table.insert(lines, "")
-  table.insert(lines, "  Type \"" .. confirm_word .. "\" to confirm:")
+  table.insert(lines, '  Press y to confirm, then type "' .. confirm_word .. '"')
+  table.insert(lines, "  Press q or Esc to cancel")
 
   local popup_buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_lines(popup_buf, 0, -1, false, lines)
+  vim.api.nvim_set_option_value("modifiable", false, { buf = popup_buf })
 
   local max_w = 0
   for _, l in ipairs(lines) do max_w = math.max(max_w, vim.fn.strdisplaywidth(l)) end
   local width = math.min(math.max(max_w + 4, 40), vim.o.columns - 10)
-  local height = math.min(#lines + 1, math.floor(vim.o.lines * 0.5))
+  local height = math.min(#lines, math.floor(vim.o.lines * 0.5))
 
   local win = vim.api.nvim_open_win(popup_buf, true, {
     relative = "editor",
@@ -82,18 +86,15 @@ local function destructive_confirm(title, ddl_sql, confirm_word, callback)
     border = "rounded",
     title = " Confirm ",
     title_pos = "center",
+    zindex = 60,
   })
 
   local function close()
     if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
   end
 
-  for _, key in ipairs({ "q", "<Esc>" }) do
-    vim.keymap.set("n", key, close, { buffer = popup_buf })
-  end
-
-  -- Use vim.ui.input for the typed confirmation
-  vim.schedule(function()
+  -- y: close float, then ask for typed confirmation
+  vim.keymap.set("n", "y", function()
     close()
     vim.ui.input({ prompt = 'Type "' .. confirm_word .. '" to confirm: ' }, function(input)
       if input == confirm_word then
@@ -102,7 +103,14 @@ local function destructive_confirm(title, ddl_sql, confirm_word, callback)
         vim.notify("Cancelled (input did not match)", vim.log.levels.INFO)
       end
     end)
-  end)
+  end, { buffer = popup_buf })
+
+  for _, key in ipairs({ "q", "<Esc>" }) do
+    vim.keymap.set("n", key, function()
+      close()
+      vim.notify("Cancelled", vim.log.levels.INFO)
+    end, { buffer = popup_buf })
+  end
 end
 
 -- ── column rename ───────────────────────────────────────────────────────────
@@ -261,7 +269,7 @@ function M.create_table(url, on_done)
   end)
 end
 
-function build_create_sql(table_name, columns, url, on_done)
+local function build_create_sql(table_name, columns, url, on_done)
   local col_defs = {}
   local pk_cols = {}
 

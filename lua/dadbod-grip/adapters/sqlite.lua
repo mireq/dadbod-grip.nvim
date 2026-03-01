@@ -64,7 +64,7 @@ function M.get_primary_keys(table_name, url)
   local tbl = table_name:gsub('^"', ''):gsub('"$', '')
   tbl = tbl:match("^[^.]+%.(.+)$") or tbl
 
-  local stdout, stderr, code = sqlite3(db_path, string.format("PRAGMA table_info(%s)", tbl))
+  local stdout, stderr, code = sqlite3(db_path, string.format('PRAGMA table_info("%s")', tbl:gsub('"', '""')))
   if code ~= 0 then
     return {}, stderr ~= "" and stderr or "Failed to query primary keys"
   end
@@ -97,7 +97,7 @@ function M.get_column_info(table_name, url)
   local tbl = table_name:gsub('^"', ''):gsub('"$', '')
   tbl = tbl:match("^[^.]+%.(.+)$") or tbl
 
-  local stdout, stderr, code = sqlite3(db_path, string.format("PRAGMA table_info(%s)", tbl))
+  local stdout, stderr, code = sqlite3(db_path, string.format('PRAGMA table_info("%s")', tbl:gsub('"', '""')))
   if code ~= 0 then
     return nil, stderr ~= "" and stderr or "Failed to query column info"
   end
@@ -127,7 +127,7 @@ function M.get_foreign_keys(table_name, url)
   local tbl = table_name:gsub('^"', ''):gsub('"$', '')
   tbl = tbl:match("^[^.]+%.(.+)$") or tbl
 
-  local stdout, stderr, code = sqlite3(db_path, string.format("PRAGMA foreign_key_list(%s)", tbl))
+  local stdout, stderr, code = sqlite3(db_path, string.format('PRAGMA foreign_key_list("%s")', tbl:gsub('"', '""')))
   if code ~= 0 then
     return {}, stderr ~= "" and stderr or "Failed to query foreign keys"
   end
@@ -192,7 +192,7 @@ function M.get_indexes(table_name, url)
   tbl = tbl:match("^[^.]+%.(.+)$") or tbl
 
   -- Get index list
-  local stdout, stderr, code = sqlite3(db_path, string.format("PRAGMA index_list(%s)", tbl))
+  local stdout, stderr, code = sqlite3(db_path, string.format('PRAGMA index_list("%s")', tbl:gsub('"', '""')))
   if code ~= 0 then
     return {}, stderr ~= "" and stderr or "Failed to query indexes"
   end
@@ -209,7 +209,7 @@ function M.get_indexes(table_name, url)
     local idx_type = origin == "pk" and "PRIMARY" or (is_unique and "UNIQUE" or "INDEX")
 
     -- Get columns for this index
-    local col_stdout = sqlite3(db_path, string.format("PRAGMA index_info(%s)", idx_name))
+    local col_stdout = sqlite3(db_path, string.format('PRAGMA index_info("%s")', idx_name:gsub('"', '""')))
     local col_parsed = db_util.parse_csv(col_stdout)
     local cols = {}
     if col_parsed then

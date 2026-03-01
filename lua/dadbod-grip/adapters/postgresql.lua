@@ -10,7 +10,7 @@ local DEFAULT_TIMEOUT = 10000
 
 local function psql(url, sql_str, timeout_ms)
   local result = vim.system(
-    { "psql", url, "--no-password", "-A", "-F", "|", "--csv", "-c", sql_str },
+    { "psql", url, "--no-password", "--csv", "-c", sql_str },
     { text = true, timeout = timeout_ms or DEFAULT_TIMEOUT }
   ):wait()
   return result.stdout or "", result.stderr or "", result.code

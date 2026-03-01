@@ -94,7 +94,7 @@ function M.open(url, opts)
     local db_mod = require("dadbod-grip.db")
     url = db_mod.get_url()
     if not url then
-      vim.notify("Grip: no database connection. Set vim.g.db or use :GripConnect.", vim.log.levels.ERROR)
+      vim.notify("Grip: no database connection. Use :GripConnect or set vim.g.db.", vim.log.levels.WARN)
       return
     end
   end

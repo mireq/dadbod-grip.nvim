@@ -1,10 +1,11 @@
 -- view.lua — buffer rendering + keymaps.
 -- One buffer per grip session. State in M._sessions[bufnr].
 
-local data  = require("dadbod-grip.data")
-local sql   = require("dadbod-grip.sql")
-local db    = require("dadbod-grip.db")
-local qmod  = require("dadbod-grip.query")
+local data   = require("dadbod-grip.data")
+local sql    = require("dadbod-grip.sql")
+local db     = require("dadbod-grip.db")
+local qmod   = require("dadbod-grip.query")
+local editor = require("dadbod-grip.editor")
 
 local M = {}
 M._sessions = {}  -- [bufnr] = { state, url, query_sql }
@@ -486,7 +487,7 @@ local function build_render(session, opts)
   table.insert(lines, hints)
 
   local data_start = has_type_row and 5 or 4
-  return { lines = lines, marks = marks, widths = widths, ordered = ordered, byte_positions = row_byte_positions, data_start = data_start }
+  return { lines = lines, marks = marks, widths = widths, ordered = ordered, byte_positions = row_byte_positions, data_start = data_start, visible_columns = columns }
 end
 
 -- ── namespace for extmarks ───────────────────────────────────────────────
@@ -612,6 +613,7 @@ function M._update_live_sql_float(session)
       title = " Live SQL ",
       title_pos = "center",
       focusable = false,
+      zindex = 40,
     })
     session._live_sql_win = win
     session._live_sql_buf = buf
@@ -648,9 +650,11 @@ function M.get_cell(bufnr)
   if not row_idx then return nil end
 
   -- Use cached byte positions from build_render
+  -- Iterate visible_columns so col_idx matches the rendered layout
   local bp_row = r.byte_positions and r.byte_positions[row_order_idx]
+  local vis_cols = r.visible_columns or st.columns
   if bp_row then
-    for i, col in ipairs(st.columns) do
+    for i, col in ipairs(vis_cols) do
       local bp = bp_row[col]
       if bp and col_nr >= bp.start and col_nr <= bp.finish then
         local value = data.effective_value(st, row_idx, col)
@@ -662,8 +666,8 @@ function M.get_cell(bufnr)
         }
       end
     end
-    -- Cursor is on a separator or border — snap to nearest column
-    for i, col in ipairs(st.columns) do
+    -- Cursor is on a separator or border -- snap to nearest column
+    for i, col in ipairs(vis_cols) do
       local bp = bp_row[col]
       if bp and col_nr < bp.start then
         local value = data.effective_value(st, row_idx, col)
@@ -784,6 +788,7 @@ local function open_info_float(grip_win, lines, float_opts)
     border = "rounded",
     title = float_opts.title or "",
     title_pos = "center",
+    zindex = 50,
   })
 
   for _, key in ipairs({ "q", "<Esc>" }) do
@@ -1309,77 +1314,38 @@ function M._setup_keymaps(bufnr)
     end
   end, "Row view")
 
+  -- Shared helper: navigate to column by visible index offset
+  local function nav_col(bufnr_l, offset)
+    local cell = M.get_cell(bufnr_l)
+    if not cell then return end
+    local session_n = M._sessions[bufnr_l]
+    local r = session_n._render
+    local cols = r.visible_columns or session_n.state.columns
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    local ds = r.data_start or 4
+    local row_order_idx = cursor[1] - ds + 1
+    local bp_row = r.byte_positions and r.byte_positions[row_order_idx]
+    if not bp_row then return end
+    local target_idx
+    if offset > 0 then
+      target_idx = (cell.col_idx % #cols) + 1
+    else
+      target_idx = cell.col_idx == 1 and #cols or cell.col_idx - 1
+    end
+    local target_col = cols[target_idx]
+    local bp = bp_row[target_col]
+    if not bp then return end
+    vim.api.nvim_win_set_cursor(0, { cursor[1], bp.start })
+  end
+
   -- Tab: next column
-  map("<Tab>", function()
-    local cell = M.get_cell(bufnr)
-    if not cell then return end
-    local session = M._sessions[bufnr]
-    local r = session._render
-    local cols = session.state.columns
-    local cursor = vim.api.nvim_win_get_cursor(0)
-    local ds = r.data_start or 4
-    local row_order_idx = cursor[1] - ds + 1
-    local bp_row = r.byte_positions and r.byte_positions[row_order_idx]
-    if not bp_row then return end
-    local next_idx = (cell.col_idx % #cols) + 1
-    local target_col = cols[next_idx]
-    local target_byte = bp_row[target_col].start
-    vim.api.nvim_win_set_cursor(0, { cursor[1], target_byte })
-  end, "Next column")
-
+  map("<Tab>", function() nav_col(bufnr, 1) end, "Next column")
   -- S-Tab: previous column
-  map("<S-Tab>", function()
-    local cell = M.get_cell(bufnr)
-    if not cell then return end
-    local session = M._sessions[bufnr]
-    local r = session._render
-    local cols = session.state.columns
-    local cursor = vim.api.nvim_win_get_cursor(0)
-    local ds = r.data_start or 4
-    local row_order_idx = cursor[1] - ds + 1
-    local bp_row = r.byte_positions and r.byte_positions[row_order_idx]
-    if not bp_row then return end
-    local prev_idx = cell.col_idx == 1 and #cols or cell.col_idx - 1
-    local target_col = cols[prev_idx]
-    local target_byte = bp_row[target_col].start
-    vim.api.nvim_win_set_cursor(0, { cursor[1], target_byte })
-  end, "Previous column")
-
+  map("<S-Tab>", function() nav_col(bufnr, -1) end, "Previous column")
   -- w: next column (alias for Tab)
-  map("w", function()
-    local cell = M.get_cell(bufnr)
-    if not cell then return end
-    local session = M._sessions[bufnr]
-    local r = session._render
-    local cols = session.state.columns
-    local cursor = vim.api.nvim_win_get_cursor(0)
-    local ds = r.data_start or 4
-    local row_order_idx = cursor[1] - ds + 1
-    local bp_row = r.byte_positions and r.byte_positions[row_order_idx]
-    if not bp_row then return end
-    local next_idx = (cell.col_idx % #cols) + 1
-    local target_col = cols[next_idx]
-    local target_byte = bp_row[target_col].start
-    vim.api.nvim_win_set_cursor(0, { cursor[1], target_byte })
-  end, "Next column")
-
+  map("w", function() nav_col(bufnr, 1) end, "Next column")
   -- b: previous column (alias for S-Tab)
-  map("b", function()
-    local cell = M.get_cell(bufnr)
-    if not cell then return end
-    local session = M._sessions[bufnr]
-    local r = session._render
-    local cols = session.state.columns
-    local cursor = vim.api.nvim_win_get_cursor(0)
-    local ds = r.data_start or 4
-    local row_order_idx = cursor[1] - ds + 1
-    local bp_row = r.byte_positions and r.byte_positions[row_order_idx]
-    if not bp_row then return end
-    local prev_idx = cell.col_idx == 1 and #cols or cell.col_idx - 1
-    local target_col = cols[prev_idx]
-    local target_byte = bp_row[target_col].start
-    vim.api.nvim_win_set_cursor(0, { cursor[1], target_byte })
-  end, "Previous column")
+  map("b", function() nav_col(bufnr, -1) end, "Previous column")
 
   -- gg: first data row, same column
   map("gg", function()
@@ -1407,14 +1373,15 @@ function M._setup_keymaps(bufnr)
     local session = M._sessions[bufnr]
     if not session or not session._render then return end
     local r = session._render
-    local cols = session.state.columns
+    local cols = r.visible_columns or session.state.columns
     local cursor = vim.api.nvim_win_get_cursor(0)
     local ds = r.data_start or 4
     local row_order_idx = cursor[1] - ds + 1
     local bp_row = r.byte_positions and r.byte_positions[row_order_idx]
     if not bp_row then return end
-    local target_byte = bp_row[cols[1]].start
-    vim.api.nvim_win_set_cursor(0, { cursor[1], target_byte })
+    local bp = bp_row[cols[1]]
+    if not bp then return end
+    vim.api.nvim_win_set_cursor(0, { cursor[1], bp.start })
   end, "First column")
 
   -- 0: unpin all OR first column (dual behavior)
@@ -1430,14 +1397,15 @@ function M._setup_keymaps(bufnr)
     -- Fallback: jump to first column
     if not session._render then return end
     local r = session._render
-    local cols = session.state.columns
+    local cols = r.visible_columns or session.state.columns
     local cursor = vim.api.nvim_win_get_cursor(0)
     local ds = r.data_start or 4
     local row_order_idx = cursor[1] - ds + 1
     local bp_row = r.byte_positions and r.byte_positions[row_order_idx]
     if not bp_row then return end
-    local target_byte = bp_row[cols[1]].start
-    vim.api.nvim_win_set_cursor(0, { cursor[1], target_byte })
+    local bp = bp_row[cols[1]]
+    if not bp then return end
+    vim.api.nvim_win_set_cursor(0, { cursor[1], bp.start })
   end, "Unpin all / first column")
 
   -- 1-9: pin N leftmost columns
@@ -1532,14 +1500,15 @@ function M._setup_keymaps(bufnr)
     local session = M._sessions[bufnr]
     if not session or not session._render then return end
     local r = session._render
-    local cols = session.state.columns
+    local cols = r.visible_columns or session.state.columns
     local cursor = vim.api.nvim_win_get_cursor(0)
     local ds = r.data_start or 4
     local row_order_idx = cursor[1] - ds + 1
     local bp_row = r.byte_positions and r.byte_positions[row_order_idx]
     if not bp_row then return end
-    local target_byte = bp_row[cols[#cols]].start
-    vim.api.nvim_win_set_cursor(0, { cursor[1], target_byte })
+    local bp = bp_row[cols[#cols]]
+    if not bp then return end
+    vim.api.nvim_win_set_cursor(0, { cursor[1], bp.start })
   end, "Last column")
 
   -- {: previous modified/staged row
@@ -2239,15 +2208,17 @@ function M._setup_keymaps(bufnr)
   -- go: toggle schema sidebar
   map("go", function()
     local schema = require("dadbod-grip.schema")
-    schema.toggle(url)
+    local s_url = M._sessions[bufnr] and M._sessions[bufnr].url
+    schema.toggle(s_url)
   end, "Toggle schema browser")
 
   -- gT: table picker
   map("gT", function()
     local picker = require("dadbod-grip.picker")
-    picker.pick_table(url, function(name)
+    local s_url = M._sessions[bufnr] and M._sessions[bufnr].url
+    picker.pick_table(s_url, function(name)
       local grip = require("dadbod-grip")
-      grip.open(name, url)
+      grip.open(name, s_url)
     end)
   end, "Pick table")
 
@@ -2255,13 +2226,14 @@ function M._setup_keymaps(bufnr)
   map("gQ", function()
     local query_pad = require("dadbod-grip.query_pad")
     local session_q = M._sessions[bufnr]
+    local s_url = session_q and session_q.url
     local initial_sql
     if session_q and session_q.query_spec then
       initial_sql = qmod.build_sql(session_q.query_spec)
     elseif session_q and session_q.query_sql then
       initial_sql = session_q.query_sql
     end
-    query_pad.open(url, initial_sql and { initial_sql = initial_sql } or nil)
+    query_pad.open(s_url, initial_sql and { initial_sql = initial_sql } or nil)
   end, "Open query pad")
 
   -- ?: help popup
@@ -2400,6 +2372,7 @@ function M._setup_keymaps(bufnr)
       border = "rounded",
       title = " Help ",
       title_pos = "center",
+      zindex = 50,
     })
     for _, key in ipairs({ "q", "?", "<Esc>" }) do
       vim.keymap.set("n", key, function()

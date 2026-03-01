@@ -17,8 +17,8 @@ local function parse_url(url)
 
   local user, pass, host, port, dbname
 
-  -- Split auth@hostpath
-  local auth, hostpath = rest:match("^([^@]+)@(.+)$")
+  -- Split auth@hostpath (match last @ to support passwords containing @)
+  local auth, hostpath = rest:match("^(.+)@([^@]+)$")
   if not auth then
     hostpath = rest
   else

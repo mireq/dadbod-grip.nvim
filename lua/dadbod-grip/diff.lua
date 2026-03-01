@@ -309,9 +309,11 @@ function M.open(left_arg, right_arg, url)
     vim.keymap.set("n", key, fn, { buffer = bufnr, desc = desc })
   end
 
-  map("q", function()
+  local function close_diff()
     vim.api.nvim_buf_delete(bufnr, { force = true })
-  end, "Close diff")
+  end
+  map("q", close_diff, "Close diff")
+  map("<Esc>", close_diff, "Close diff")
 
   -- ]c / [c: navigate between diff rows
   map("]c", function()

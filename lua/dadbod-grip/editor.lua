@@ -41,6 +41,7 @@ function M.open(prompt, initial_value, on_save)
     title_pos = "center",
     footer = "  <CR> save   <Esc> cancel  ",
     footer_pos = "right",
+    zindex = 60,
   })
 
   -- Start in insert mode at end of line
@@ -129,7 +130,7 @@ function M.show_error(title, lines)
     end
   end
 
-  local float_win = vim.api.nvim_open_win(err_buf, false, {
+  local float_win = vim.api.nvim_open_win(err_buf, true, {
     relative = "editor",
     row = math.floor((vim.o.lines - #lines - 4) / 2),
     col = math.floor((vim.o.columns - width) / 2),
@@ -139,10 +140,21 @@ function M.show_error(title, lines)
     border = "rounded",
     title = " " .. (title or "Error") .. " ",
     title_pos = "center",
+    zindex = 70,
   })
 
-  -- Auto-dismiss on cursor move or q
-  vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
+  -- Dismiss with q or Esc
+  for _, key in ipairs({ "q", "<Esc>" }) do
+    vim.keymap.set("n", key, function()
+      if vim.api.nvim_win_is_valid(float_win) then
+        vim.api.nvim_win_close(float_win, true)
+      end
+    end, { buffer = err_buf, nowait = true })
+  end
+
+  -- Also dismiss when leaving the error float window
+  vim.api.nvim_create_autocmd("WinLeave", {
+    buffer = err_buf,
     once = true,
     callback = function()
       if vim.api.nvim_win_is_valid(float_win) then
@@ -150,12 +162,6 @@ function M.show_error(title, lines)
       end
     end,
   })
-
-  vim.keymap.set("n", "q", function()
-    if vim.api.nvim_win_is_valid(float_win) then
-      vim.api.nvim_win_close(float_win, true)
-    end
-  end, { buffer = err_buf, nowait = true })
 end
 
 return M

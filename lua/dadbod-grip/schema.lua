@@ -461,7 +461,7 @@ function M.toggle(url)
     local db_mod = require("dadbod-grip.db")
     url = db_mod.get_url()
     if not url then
-      vim.notify("Grip: no database connection. Set vim.g.db or use :GripConnect.", vim.log.levels.ERROR)
+      vim.notify("Grip: no database connection. Use :GripConnect or set vim.g.db.", vim.log.levels.WARN)
       return
     end
   end
@@ -507,6 +507,10 @@ function M.close()
     vim.api.nvim_win_close(_sidebar_winid, true)
   end
   _sidebar_winid = nil
+end
+
+function M.is_open()
+  return _sidebar_winid ~= nil and vim.api.nvim_win_is_valid(_sidebar_winid)
 end
 
 --- Refresh sidebar if visible (e.g., after connection switch).

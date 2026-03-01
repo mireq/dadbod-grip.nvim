@@ -84,7 +84,7 @@ Makes vim-dadbod-ui optional. grip + vim-dadbod = complete DB workflow.
 
 - [x] Table properties view: `gI` / `:GripProperties` float with columns, indexes, stats
 - [x] Column rename: R in properties view, `:GripRename` command
-- [x] Column add/drop: + and - in properties view with DDL preview
+- [x] Column add/drop: + and x in properties view with DDL preview
 - [x] Drop table: `:GripDrop` with typed confirmation and CASCADE awareness
 - [x] Create table: `:GripCreate` interactive column designer
 
