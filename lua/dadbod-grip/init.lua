@@ -176,7 +176,7 @@ local function do_edit(bufnr, cell, url)
     local actual_val = new_val == editor.NULL_VALUE and nil or new_val
 
     local new_state = data.add_change(session.state, cell.row_idx, cell.col_name, actual_val)
-    view.render(bufnr, new_state)
+    view.apply_edit(bufnr, new_state)
   end)
 end
 
@@ -305,13 +305,13 @@ function M.open(arg, url, opts)
       else
         vim.notify("Row " .. row_idx .. " marked for deletion", vim.log.levels.INFO)
       end
-      view.render(bid, new_state)
+      view.apply_edit(bid, new_state)
     end,
     on_insert = function(bid, after_idx)
       local session_i = view._sessions[bid]
       if not session_i then return end
       local new_state = data.insert_row(session_i.state, after_idx)
-      view.render(bid, new_state)
+      view.apply_edit(bid, new_state)
       vim.notify("Inserted blank row", vim.log.levels.INFO)
       -- Move cursor to first cell of the new row
       local r = session_i._render

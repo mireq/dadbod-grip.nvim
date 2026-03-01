@@ -507,6 +507,21 @@ function M.render(bufnr, state)
   M._update_live_sql_float(session)
 end
 
+local UNDO_STACK_MAX = 50
+
+-- M.apply_edit(bufnr, new_state) — pushes current state to undo stack, then renders.
+-- Use this for user-initiated edits (not for refresh/requery).
+function M.apply_edit(bufnr, new_state)
+  local session = M._sessions[bufnr]
+  if not session then return end
+  if not session._undo_stack then session._undo_stack = {} end
+  table.insert(session._undo_stack, session.state)
+  if #session._undo_stack > UNDO_STACK_MAX then
+    table.remove(session._undo_stack, 1)
+  end
+  M.render(bufnr, new_state)
+end
+
 -- ── live SQL float ──────────────────────────────────────────────────────
 function M._update_live_sql_float(session)
   if not session.live_sql then return end
@@ -847,38 +862,37 @@ function M._setup_keymaps(bufnr)
     if session.on_apply then session.on_apply(bufnr) end
   end, "Apply staged changes")
 
-  -- u: undo current row
+  -- u: undo (pops from undo stack)
   map("u", function()
     local session = M._sessions[bufnr]
     if not session then return end
-    local cell = M.get_cell(bufnr)
-    if not cell then
-      vim.notify("Move cursor to a data row to undo changes", vim.log.levels.INFO)
+    if not session._undo_stack or #session._undo_stack == 0 then
+      vim.notify("Nothing to undo", vim.log.levels.INFO)
       return
     end
-    local st = session.state
-    local status = data.row_status(st, cell.row_idx)
-    if status == "clean" then
-      vim.notify("No changes on this row", vim.log.levels.INFO)
-      return
+    local prev_state = table.remove(session._undo_stack)
+    M.render(bufnr, prev_state)
+    local remaining = #session._undo_stack
+    if remaining > 0 then
+      vim.notify("Undo (" .. remaining .. " more)", vim.log.levels.INFO)
+    else
+      vim.notify("Undo (back to original)", vim.log.levels.INFO)
     end
-    local new_state = data.undo_row(st, cell.row_idx)
-    vim.notify("Undid changes on row " .. cell.row_idx, vim.log.levels.INFO)
-    M.render(bufnr, new_state)
-  end, "Undo row changes")
+  end, "Undo last edit")
 
-  -- U: undo all
+  -- U: undo all (resets to original state)
   map("U", function()
     local session = M._sessions[bufnr]
     if not session then return end
-    local staged = data.count_staged(session.state)
-    if staged == 0 then
+    if not session._undo_stack or #session._undo_stack == 0 then
       vim.notify("No staged changes", vim.log.levels.INFO)
       return
     end
-    local new_state = data.undo_all(session.state)
-    vim.notify("Undid all " .. staged .. " staged change(s)", vim.log.levels.INFO)
-    M.render(bufnr, new_state)
+    local original = session._undo_stack[1]
+    local count = #session._undo_stack
+    session._undo_stack = {}
+    M.render(bufnr, original)
+    vim.notify("Undid all " .. count .. " change(s)", vim.log.levels.INFO)
   end, "Undo all changes")
 
   -- y: yank cell value
@@ -948,8 +962,100 @@ function M._setup_keymaps(bufnr)
     end
     local new_state = data.add_change(session.state, cell.row_idx, cell.col_name, nil)
     vim.notify(cell.col_name .. " set to NULL", vim.log.levels.INFO)
-    M.render(bufnr, new_state)
+    M.apply_edit(bufnr, new_state)
   end, "Set cell to NULL")
+
+  -- ── visual mode batch editing ──────────────────────────────────────────
+  local function vmap(key, fn, desc)
+    vim.keymap.set("v", key, fn, { buffer = bufnr, desc = desc, nowait = true })
+  end
+
+  -- Helper: collect row indices from visual selection
+  local function get_visual_rows()
+    local start_line = vim.fn.line("v")
+    local end_line = vim.fn.line(".")
+    if start_line > end_line then start_line, end_line = end_line, start_line end
+    local session = M._sessions[bufnr]
+    if not session or not session._render then return nil end
+    local r = session._render
+    local ds = r.data_start or 4
+    local rows = {}
+    for line = start_line, end_line do
+      local row_order = line - ds + 1
+      if row_order >= 1 and row_order <= #r.ordered then
+        table.insert(rows, r.ordered[row_order])
+      end
+    end
+    return rows
+  end
+
+  -- Visual e: batch edit (set all selected cells in column to same value)
+  vmap("e", function()
+    local session = M._sessions[bufnr]
+    if not session then return end
+    if session.state.readonly then
+      vim.notify("Read-only: no primary key detected", vim.log.levels.INFO)
+      return
+    end
+    local cell = M.get_cell(bufnr)
+    if not cell then return end
+    local row_indices = get_visual_rows()
+    if not row_indices or #row_indices == 0 then return end
+    -- Exit visual mode
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "n", false)
+    local col_name = cell.col_name
+    editor.open("Set " .. #row_indices .. " cells (" .. col_name .. ")", cell.value, function(new_val)
+      if new_val == nil then return end
+      local actual = new_val == editor.NULL_VALUE and nil or new_val
+      local st = session.state
+      for _, ri in ipairs(row_indices) do
+        st = data.add_change(st, ri, col_name, actual)
+      end
+      M.apply_edit(bufnr, st)
+      vim.notify("Set " .. #row_indices .. " cells in " .. col_name, vim.log.levels.INFO)
+    end)
+  end, "Batch edit selected cells")
+
+  -- Visual d: toggle delete on all selected rows
+  vmap("d", function()
+    local session = M._sessions[bufnr]
+    if not session then return end
+    if session.state.readonly then
+      vim.notify("Read-only: no primary key detected", vim.log.levels.INFO)
+      return
+    end
+    local row_indices = get_visual_rows()
+    if not row_indices or #row_indices == 0 then return end
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "n", false)
+    local st = session.state
+    for _, ri in ipairs(row_indices) do
+      st = data.toggle_delete(st, ri)
+    end
+    M.apply_edit(bufnr, st)
+    vim.notify("Toggled delete on " .. #row_indices .. " row(s)", vim.log.levels.INFO)
+  end, "Batch toggle delete")
+
+  -- Visual n: set all selected cells to NULL
+  vmap("n", function()
+    local session = M._sessions[bufnr]
+    if not session then return end
+    if session.state.readonly then
+      vim.notify("Read-only: no primary key detected", vim.log.levels.INFO)
+      return
+    end
+    local cell = M.get_cell(bufnr)
+    if not cell then return end
+    local row_indices = get_visual_rows()
+    if not row_indices or #row_indices == 0 then return end
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "n", false)
+    local col_name = cell.col_name
+    local st = session.state
+    for _, ri in ipairs(row_indices) do
+      st = data.add_change(st, ri, col_name, nil)
+    end
+    M.apply_edit(bufnr, st)
+    vim.notify("Set " .. #row_indices .. " cells to NULL in " .. col_name, vim.log.levels.INFO)
+  end, "Batch set NULL")
 
   -- gs: preview staged SQL in float
   map("gs", function()
@@ -1380,7 +1486,7 @@ function M._setup_keymaps(bufnr)
     clipboard = clipboard:gsub("\n$", "")
     local new_state = data.add_change(session.state, cell.row_idx, cell.col_name, clipboard)
     vim.notify(cell.col_name .. " = " .. clipboard:sub(1, 30), vim.log.levels.INFO)
-    M.render(bufnr, new_state)
+    M.apply_edit(bufnr, new_state)
   end, "Paste into cell")
 
   -- gl: toggle live SQL preview float
@@ -1862,7 +1968,7 @@ function M._setup_keymaps(bufnr)
             if v == nil then json_val = "null"
             elseif tonumber(v) then json_val = v
             elseif v == "true" or v == "false" then json_val = v
-            else json_val = '"' .. v:gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n') .. '"'
+            else json_val = '"' .. v:gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n'):gsub('\r', '\\r'):gsub('\t', '\\t') .. '"'
             end
             table.insert(obj_parts, '    "' .. col .. '": ' .. json_val)
           end
@@ -1882,12 +1988,14 @@ function M._setup_keymaps(bufnr)
         end
         output = table.concat(stmts, "\n")
       elseif choice == "Markdown" then
-        local hdr = "| " .. table.concat(cols, " | ") .. " |"
+        local hdr = "| " .. table.concat(vim.tbl_map(function(c) return c:gsub("|", "\\|") end, cols), " | ") .. " |"
         local sep = "| " .. table.concat(vim.tbl_map(function() return "---" end, cols), " | ") .. " |"
         local lines_out = { hdr, sep }
         for _, row in ipairs(rows_data) do
           local parts = {}
-          for _, v in ipairs(row) do table.insert(parts, v or "") end
+          for _, v in ipairs(row) do
+            table.insert(parts, (v or ""):gsub("|", "\\|"))
+          end
           table.insert(lines_out, "| " .. table.concat(parts, " | ") .. " |")
         end
         output = table.concat(lines_out, "\n")
