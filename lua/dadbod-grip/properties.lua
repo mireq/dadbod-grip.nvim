@@ -24,6 +24,19 @@ local function format_count(n)
   return string.format("~%.1fM", n / 1000000)
 end
 
+-- ── refresh open grip buffers for a table ───────────────────────────────────
+
+local function refresh_grip_buffers(table_name)
+  local view = require("dadbod-grip.view")
+  for bufnr, session in pairs(view._sessions) do
+    if session.state and session.state.table_name == table_name then
+      if session.on_refresh and vim.api.nvim_buf_is_valid(bufnr) then
+        vim.schedule(function() session.on_refresh(bufnr) end)
+      end
+    end
+  end
+end
+
 -- ── gather all properties ───────────────────────────────────────────────────
 
 local function gather(table_name, url)
@@ -114,7 +127,8 @@ local function build_lines(props)
   add(col_row("#", "Name", "Type", "Null", "Default"))
   add("  " .. string.rep("-", col_widths.num + col_widths.name + col_widths.dtype + 4 + col_widths.default + 10))
 
-  -- Column rows
+  -- Column rows (track line -> column name for DDL keymaps)
+  local col_line_map = {}
   local pk_set = {}
   for _, pk in ipairs(props.primary_keys) do pk_set[pk] = true end
   local fk_set = {}
@@ -133,6 +147,7 @@ local function build_lines(props)
     end
 
     add(col_row(tostring(i), col.column_name, col.data_type, nullable, default_val .. marker))
+    col_line_map[#lines] = col.column_name
   end
 
   add("")
@@ -175,9 +190,9 @@ local function build_lines(props)
   end
 
   -- Footer
-  add("  q close   gI reopen")
+  add("  q close   R rename   + add col   - drop col   gI refresh")
 
-  return lines, hl_marks
+  return lines, hl_marks, col_line_map
 end
 
 -- ── open float ──────────────────────────────────────────────────────────────
@@ -189,7 +204,7 @@ function M.open(table_name, url, grip_win)
   end
 
   local props = gather(table_name, url)
-  local lines, hl_marks = build_lines(props)
+  local lines, hl_marks, col_line_map = build_lines(props)
 
   local max_w = 0
   for _, l in ipairs(lines) do max_w = math.max(max_w, vim.fn.strdisplaywidth(l)) end
@@ -235,13 +250,62 @@ function M.open(table_name, url, grip_win)
   end
 
   -- gI: reopen (refresh) properties
-  vim.keymap.set("n", "gI", function()
+  local function reopen()
     if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
     if vim.api.nvim_win_is_valid(caller_win) then
       vim.api.nvim_set_current_win(caller_win)
     end
     vim.schedule(function()
       M.open(table_name, url, caller_win)
+    end)
+  end
+
+  vim.keymap.set("n", "gI", reopen, { buffer = popup_buf })
+
+  -- Helper: get column name under cursor
+  local function cursor_column()
+    local row = vim.api.nvim_win_get_cursor(win)[1]
+    return col_line_map[row]
+  end
+
+  -- R: rename column under cursor
+  vim.keymap.set("n", "R", function()
+    local col_name = cursor_column()
+    if not col_name then
+      vim.notify("Move cursor to a column row", vim.log.levels.INFO)
+      return
+    end
+    if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
+    local ddl = require("dadbod-grip.ddl")
+    ddl.rename_column(table_name, col_name, url, function()
+      -- Refresh properties and any open grip buffers
+      reopen()
+      refresh_grip_buffers(table_name)
+    end)
+  end, { buffer = popup_buf })
+
+  -- +: add column
+  vim.keymap.set("n", "+", function()
+    if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
+    local ddl = require("dadbod-grip.ddl")
+    ddl.add_column(table_name, url, function()
+      reopen()
+      refresh_grip_buffers(table_name)
+    end)
+  end, { buffer = popup_buf })
+
+  -- - (minus): drop column under cursor
+  vim.keymap.set("n", "-", function()
+    local col_name = cursor_column()
+    if not col_name then
+      vim.notify("Move cursor to a column row", vim.log.levels.INFO)
+      return
+    end
+    if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
+    local ddl = require("dadbod-grip.ddl")
+    ddl.drop_column(table_name, col_name, url, function()
+      reopen()
+      refresh_grip_buffers(table_name)
     end)
   end, { buffer = popup_buf })
 

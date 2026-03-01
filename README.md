@@ -205,6 +205,9 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `:GripConnect [url]` | Switch database connection (picker if no arg) |
 | `:GripExplain [sql]` | Render EXPLAIN plan for current or given query |
 | `:GripProperties [table]` | Show table properties (columns, indexes, stats) |
+| `:GripRename old new` | Rename a column in the current table |
+| `:GripCreate` | Create a new table interactively |
+| `:GripDrop [table]` | Drop a table with typed confirmation |
 
 ## Requirements
 

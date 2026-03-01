@@ -589,6 +589,100 @@ function M.setup(opts)
     desc  = "Load a saved query",
   })
 
+  -- Register :GripCreate command
+  vim.api.nvim_create_user_command("GripCreate", function()
+    local url = db.get_url()
+    if not url then
+      vim.notify("GripCreate: no database connection. Use :GripConnect.", vim.log.levels.WARN)
+      return
+    end
+    local ddl_mod = require("dadbod-grip.ddl")
+    ddl_mod.create_table(url, function()
+      -- Refresh schema browser if open
+      local schema_mod = require("dadbod-grip.schema")
+      if schema_mod._is_open and schema_mod._is_open() then
+        schema_mod.refresh()
+      end
+    end)
+  end, {
+    nargs = 0,
+    desc  = "Create a new table interactively",
+  })
+
+  -- Register :GripDrop command
+  vim.api.nvim_create_user_command("GripDrop", function(cmd_opts)
+    local table_name = vim.trim(cmd_opts.args or "")
+    if table_name == "" then
+      local bufnr = vim.api.nvim_get_current_buf()
+      local session = view._sessions[bufnr]
+      if session and session.state.table_name then
+        table_name = session.state.table_name
+      end
+    end
+    if table_name == "" then
+      vim.notify("GripDrop: provide a table name", vim.log.levels.WARN)
+      return
+    end
+    local url = db.get_url()
+    if not url then
+      vim.notify("GripDrop: no database connection", vim.log.levels.WARN)
+      return
+    end
+    local ddl_mod = require("dadbod-grip.ddl")
+    ddl_mod.drop_table(table_name, url, function()
+      local schema_mod = require("dadbod-grip.schema")
+      if schema_mod._is_open and schema_mod._is_open() then
+        schema_mod.refresh()
+      end
+    end)
+  end, {
+    nargs = "?",
+    desc  = "Drop a table (requires typed confirmation)",
+  })
+
+  -- Register :GripRename command
+  vim.api.nvim_create_user_command("GripRename", function(cmd_opts)
+    local args = vim.split(vim.trim(cmd_opts.args or ""), "%s+")
+    local bufnr = vim.api.nvim_get_current_buf()
+    local session = view._sessions[bufnr]
+    local table_name = session and session.state.table_name
+
+    if not table_name then
+      vim.notify("GripRename: run from a Grip buffer", vim.log.levels.WARN)
+      return
+    end
+    local url = db.get_url(session and session.url)
+    if not url then
+      vim.notify("GripRename: no database connection", vim.log.levels.WARN)
+      return
+    end
+
+    local ddl_mod = require("dadbod-grip.ddl")
+    if #args >= 2 then
+      -- :GripRename old_name new_name
+      local old_name, new_name = args[1], args[2]
+      local sql_mod = require("dadbod-grip.sql")
+      local ddl_sql = string.format('ALTER TABLE %s RENAME COLUMN %s TO %s',
+        sql_mod.quote_ident(table_name), sql_mod.quote_ident(old_name), sql_mod.quote_ident(new_name))
+      local _, err = db.execute(ddl_sql, url)
+      if err then
+        vim.notify("Rename failed: " .. err, vim.log.levels.ERROR)
+      else
+        vim.notify("Renamed " .. old_name .. " to " .. new_name, vim.log.levels.INFO)
+        if session.on_refresh then session.on_refresh(bufnr) end
+      end
+    elseif #args == 1 then
+      ddl_mod.rename_column(table_name, args[1], url, function()
+        if session.on_refresh then session.on_refresh(bufnr) end
+      end)
+    else
+      vim.notify("Usage: :GripRename old_name [new_name]", vim.log.levels.WARN)
+    end
+  end, {
+    nargs = "+",
+    desc  = "Rename a column: :GripRename old_name new_name",
+  })
+
   -- Register :GripProperties command
   vim.api.nvim_create_user_command("GripProperties", function(cmd_opts)
     local arg = vim.trim(cmd_opts.args or "")

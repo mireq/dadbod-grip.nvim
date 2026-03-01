@@ -157,6 +157,21 @@ All commands are global and available after the plugin loads.
   types, primary keys, foreign keys, indexes, row estimate, and table size.
   Uses the current grip table if no argument is provided.
 
+                                                              *:GripRename*
+:GripRename {old_name} [new_name]
+  Rename a column in the current table. If new_name is provided, executes
+  immediately. If only old_name is provided, prompts for the new name.
+
+                                                              *:GripCreate*
+:GripCreate
+  Open an interactive table designer. Prompts for table name and columns,
+  previews the CREATE TABLE DDL, and asks for confirmation before executing.
+
+                                                                *:GripDrop*
+:GripDrop [table]
+  Drop a table with typed confirmation (must type table name to confirm).
+  Detects foreign key dependents and offers CASCADE if they exist.
+
 ==============================================================================
 6. KEYBINDINGS                                           *grip-keybindings*
 

@@ -390,6 +390,33 @@ local function setup_keymaps(url)
     query_pad.open(url)
   end)
 
+  -- DDL: drop table
+  map("D", function()
+    local node = node_at_cursor(state)
+    if not node or node.kind ~= "table" then
+      vim.notify("Move cursor to a table", vim.log.levels.INFO)
+      return
+    end
+    local ddl = require("dadbod-grip.ddl")
+    ddl.drop_table(node.name, url, function()
+      state.items = nil
+      state.col_cache = {}
+      fetch_tables(state)
+      render(state)
+    end)
+  end)
+
+  -- DDL: create table
+  map("+", function()
+    local ddl = require("dadbod-grip.ddl")
+    ddl.create_table(url, function()
+      state.items = nil
+      state.col_cache = {}
+      fetch_tables(state)
+      render(state)
+    end)
+  end)
+
   -- Close
   map("q", function() M.close() end)
   map("<Esc>", function() M.close() end)
@@ -408,6 +435,8 @@ local function setup_keymaps(url)
       " r        Refresh schema",
       " gT       Table picker",
       " gQ       Query pad",
+      " D        Drop table (confirm)",
+      " +        Create table",
       " q / Esc  Close",
     }
     vim.notify(table.concat(help, "\n"), vim.log.levels.INFO)
