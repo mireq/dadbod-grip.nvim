@@ -185,6 +185,11 @@ local function title_line(session, columns, widths, total_width)
   if session.pinned_count and session.pinned_count > 0 then
     table.insert(badges, session.pinned_count .. " pinned")
   end
+  local hidden_count = 0
+  if session.hidden_columns then
+    for _ in pairs(session.hidden_columns) do hidden_count = hidden_count + 1 end
+  end
+  if hidden_count > 0 then table.insert(badges, hidden_count .. " hidden") end
   local right_info = #badges > 0 and (" [" .. table.concat(badges, " | ") .. "] ") or " "
 
   -- Build title with breadcrumb for FK navigation
@@ -210,7 +215,12 @@ end
 local function build_render(session, opts)
   local configured_max = (opts and opts.max_col_width) or MAX_COL_WIDTH
   local st = session.state
-  local columns = st.columns
+  local hidden = session.hidden_columns or {}
+  local columns = {}
+  for _, col in ipairs(st.columns) do
+    if not hidden[col] then table.insert(columns, col) end
+  end
+  if #columns == 0 then columns = st.columns end  -- never hide all
   local ordered = data.get_ordered_rows(st)
   local pin = session.pinned_count or 0
   if pin >= #columns then pin = 0 end  -- can't pin all columns
@@ -436,6 +446,11 @@ local function build_render(session, opts)
   if staged_count > 0 then table.insert(status_parts, staged_count .. " staged") end
   if st.readonly then table.insert(status_parts, "read-only") end
   if pin > 0 then table.insert(status_parts, pin .. " pinned") end
+  local hidden_n = 0
+  if session.hidden_columns then
+    for _ in pairs(session.hidden_columns) do hidden_n = hidden_n + 1 end
+  end
+  if hidden_n > 0 then table.insert(status_parts, hidden_n .. " hidden") end
 
   -- Filter summary
   if session.query_spec then
@@ -668,6 +683,7 @@ function M.open(state, url, query_sql, opts)
     url = url,
     query_sql = query_sql,
     opts = opts or {},
+    hidden_columns = {},
   }
 
   -- Open in existing window (reuse_win) or a new horizontal split below
@@ -1405,6 +1421,77 @@ function M._setup_keymaps(bufnr)
       M.render(bufnr, session.state)
     end, "Pin " .. n .. " column(s)")
   end
+
+  -- -: hide column under cursor
+  map("-", function()
+    local session = M._sessions[bufnr]
+    if not session then return end
+    local cell = M.get_cell(bufnr)
+    if not cell then
+      vim.notify("Move cursor to a column to hide", vim.log.levels.INFO)
+      return
+    end
+    if not session.hidden_columns then session.hidden_columns = {} end
+    -- Count visible columns
+    local visible = 0
+    for _, col in ipairs(session.state.columns) do
+      if not session.hidden_columns[col] then visible = visible + 1 end
+    end
+    if visible <= 1 then
+      vim.notify("Cannot hide last visible column", vim.log.levels.INFO)
+      return
+    end
+    session.hidden_columns[cell.col_name] = true
+    vim.notify("Hidden: " .. cell.col_name, vim.log.levels.INFO)
+    M.render(bufnr, session.state)
+  end, "Hide column under cursor")
+
+  -- g-: restore all hidden columns
+  map("g-", function()
+    local session = M._sessions[bufnr]
+    if not session then return end
+    if not session.hidden_columns or not next(session.hidden_columns) then
+      vim.notify("No hidden columns", vim.log.levels.INFO)
+      return
+    end
+    local count = 0
+    for _ in pairs(session.hidden_columns) do count = count + 1 end
+    session.hidden_columns = {}
+    vim.notify("Restored " .. count .. " hidden column(s)", vim.log.levels.INFO)
+    M.render(bufnr, session.state)
+  end, "Restore all hidden columns")
+
+  -- gH: column visibility picker
+  map("gH", function()
+    local session = M._sessions[bufnr]
+    if not session then return end
+    if not session.hidden_columns then session.hidden_columns = {} end
+    local items = {}
+    for _, col in ipairs(session.state.columns) do
+      local hidden = session.hidden_columns[col]
+      local prefix = hidden and "[ ] " or "[x] "
+      table.insert(items, prefix .. col)
+    end
+    vim.ui.select(items, { prompt = "Toggle column visibility:" }, function(choice)
+      if not choice then return end
+      local col_name = choice:sub(5)
+      if session.hidden_columns[col_name] then
+        session.hidden_columns[col_name] = nil
+      else
+        -- Check we're not hiding the last visible column
+        local visible = 0
+        for _, col in ipairs(session.state.columns) do
+          if not session.hidden_columns[col] and col ~= col_name then visible = visible + 1 end
+        end
+        if visible == 0 then
+          vim.notify("Cannot hide last visible column", vim.log.levels.INFO)
+          return
+        end
+        session.hidden_columns[col_name] = true
+      end
+      M.render(bufnr, session.state)
+    end)
+  end, "Toggle column visibility")
 
   -- $: last column of current row
   map("$", function()
@@ -2153,6 +2240,9 @@ function M._setup_keymaps(bufnr)
       "  ^         First column",
       "  1-9       Pin N leftmost columns (freeze)",
       "  0         Unpin all / first column",
+      "  -         Hide column under cursor",
+      "  g-        Restore all hidden columns",
+      "  gH        Column visibility picker",
       "  $         Last column",
       "  {/}       Prev / next modified row",
       "  <CR>      Expand cell value in popup",
