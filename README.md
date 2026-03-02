@@ -32,7 +32,7 @@ d   ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝
 
      (WOW DAD!!!)~  ᕦ( ᐛ )ᕤ
 
-       dadbod-grip v2.4.0
+       dadbod-grip v2.5.0
 
      DataGrip-style grids for Neovim
      powered by vim-dadbod
