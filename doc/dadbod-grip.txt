@@ -24,6 +24,11 @@ CONTENTS                                                    *grip-contents*
   15. Schema Operations ........ |grip-ddl|
   16. Adapters ................. |grip-adapters|
   17. Public API ............... |grip-api|
+  18. Query History ............ |grip-history|
+  19. Data Diff ................ |grip-diff|
+  20. Table Profiling .......... |grip-profiling|
+  21. Query Doctor ............. |grip-explain-full|
+  22. AI SQL Generation ........ |grip-ai|
 
 ==============================================================================
 1. INTRODUCTION                                          *grip-introduction*
@@ -98,6 +103,19 @@ Override if needed: >lua
     timeout       = 10000,  -- query timeout in milliseconds
   })
 <
+AI SQL generation (optional): >lua
+  require("dadbod-grip").setup({
+    ai = {
+      provider = nil,       -- nil = auto-detect, or "anthropic"/"openai"/"gemini"/"ollama"
+      model = nil,          -- nil = provider default
+      api_key = nil,        -- nil = env var, "env:VAR", "cmd:op read ...", or direct string
+      base_url = nil,       -- override for ollama or proxy
+    }
+  })
+<
+Provider auto-detection priority: ANTHROPIC_API_KEY > OPENAI_API_KEY >
+GEMINI_API_KEY > ollama (local). Explicit provider setting always wins.
+
 No default keymaps are set outside the grip buffer.
 
 ==============================================================================
@@ -556,6 +574,106 @@ grip.open_smart()
     - DBUI SQL buffer: opens that table, reuses dbout window
     - dbout result buffer: traces back to source table
     - Normal buffer: uses word under cursor as table name
+
+==============================================================================
+18. QUERY HISTORY                                            *grip-history*
+
+Every query executed through :Grip, the query pad, and staged DML is
+recorded in .grip/history.jsonl. Each entry includes the SQL, timestamp,
+connection URL, table name, query type, and execution time.
+
+Browse history with `:GripHistory` or `gh` from a grid buffer. The picker
+supports telescope, fzf-lua, and vim.ui.select. Selecting an entry opens
+it in the query pad for review and re-execution.
+
+History is stored per-project (relative to .grip/ directory) and grows
+as an append-only JSONL file.
+
+==============================================================================
+19. DATA DIFF                                                    *grip-diff*
+
+Compare two tables row-by-row using primary keys with `:GripDiff`.
+
+  :GripDiff users users_backup
+
+The diff view shows:
+  - Changed cells highlighted in yellow
+  - Added rows highlighted in green
+  - Deleted rows highlighted in red
+  - Unchanged rows (hidden by default, toggle with `u`)
+
+Diff keymaps:
+  ]c / [c         Next / previous change
+  gv              Toggle compact / wide layout
+  u               Toggle unchanged rows
+  q / <Esc>       Close diff
+
+Auto-selects compact mode on narrow terminals (<120 columns). Compact
+mode shows changes in a stacked format; wide mode shows side-by-side.
+
+==============================================================================
+20. TABLE PROFILING                                          *grip-profiling*
+
+Profile table columns with `:GripProfile` or `gR` from a grid buffer.
+
+Shows per-column statistics:
+  - Unicode sparkline distributions (block characters)
+  - Completeness percentage (non-NULL ratio)
+  - Cardinality (distinct value count)
+  - Min/max values for numeric and date columns
+  - Top values with frequency counts
+
+Adapts layout to terminal width. Narrow terminals get a stacked layout;
+wide terminals get a tabular layout.
+
+Profiling keymaps:
+  q / <Esc>       Close profile float
+
+==============================================================================
+21. QUERY DOCTOR                                        *grip-explain-full*
+
+The Query Doctor translates raw EXPLAIN plans into plain-English health
+checks. Run with `:GripExplain` or `gx` from a grid buffer.
+
+Output includes:
+  - Severity labels: OK (green), WARN (yellow), SLOW (red)
+  - Proportional cost bars showing relative expense of each operation
+  - Actionable tips (e.g. "add an index on the filtered column")
+  - Summary with estimated total cost and row count
+
+Severity rules adapt to context:
+  - Sequential scans on small tables (<1000 rows) downgrade to OK
+  - Nested loops with few rows downgrade to OK
+  - Filters with low cost (<500) downgrade to OK
+
+Works across all four adapters:
+  - PostgreSQL: full cost and actual timing from EXPLAIN ANALYZE
+  - MySQL: cost and row estimates
+  - DuckDB: estimated cardinality
+  - SQLite: EXPLAIN QUERY PLAN operations
+
+==============================================================================
+22. AI SQL GENERATION                                             *grip-ai*
+
+Generate SQL from natural language with `:GripAsk` or `gA` from a grid.
+
+  :GripAsk show me the top 5 users by order count
+
+Schema context is auto-assembled from database metadata (table names,
+column names, types, primary keys, foreign keys). The generated SQL
+appears in the query pad for review before execution.
+
+Supported providers:
+  - Anthropic (Claude) via ANTHROPIC_API_KEY
+  - OpenAI (GPT) via OPENAI_API_KEY
+  - Google Gemini via GEMINI_API_KEY
+  - Ollama (local) as automatic fallback
+
+Auto-detection priority: Anthropic > OpenAI > Gemini > Ollama.
+Override with setup({ai={provider="openai"}}).
+
+API key resolution: env var name, "env:CUSTOM_VAR", "cmd:op read ...",
+or a direct string. See |grip-config| for the full ai config block.
 
 ==============================================================================
 vim:tw=78:ts=8:ft=help:norl:

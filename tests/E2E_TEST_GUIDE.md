@@ -70,19 +70,24 @@ All seeds create the same 13 tables + 1 view:
 ## 2. Unit Tests
 
 ```bash
-just test                       # run all 240 specs
+just test                       # run all 328 specs
 ```
 
-Expected: `RESULT: ALL TESTS PASSED` with 9 spec files:
+Expected: `RESULT: ALL TESTS PASSED` with 14 spec files:
 
 | Spec | Tests | What it covers |
 |------|-------|----------------|
 | adapter_spec | 33 | URL parsing, affected-row patterns, PRAGMA quoting, httpfs |
+| ai_spec | 16 | AI provider selection, prompt assembly, response parsing |
 | csv_parser_spec | 15 | RFC 4180 parsing, multiline, escaping |
 | data_spec | 33 | Immutable state transforms, undo, staging |
 | ddl_spec | 18 | DDL SQL generation, module scoping |
+| diff_spec | 17 | PK-matched row comparison, change detection, compact mode |
+| explain_spec | 14 | EXPLAIN parsing, Query Doctor rendering, severity rules |
 | filters_spec | 20 | Filter preset CRUD, edge cases, isolation |
+| history_spec | 24 | JSONL storage, recording, deduplication, picker |
 | init_spec | 36 | Query routing, file-as-table detection, URL detection |
+| profile_spec | 17 | Sparkline generation, column statistics, layout |
 | query_spec | 42 | Query composition, sort/filter/pagination, set_filters |
 | sql_spec | 19 | SQL quoting, UPDATE/INSERT/DELETE generation |
 | view_spec | 24 | Cell classification, conditional formatting |
@@ -457,6 +462,82 @@ These are specific bugs found and fixed. Verify they stay fixed.
 - [ ] `x` (not `-`) drops column in properties view
 - [ ] Esc closes diff buffer
 - [ ] Error float closes on `q`, `Esc`, or leaving the window
+
+---
+
+## 17. Query History Checklist (v2.4.0)
+
+- [ ] `gh` from grid opens query history picker
+- [ ] `:GripHistory` opens query history picker
+- [ ] History shows previous queries with timestamps
+- [ ] Selecting an entry opens it in the query pad
+- [ ] History persists across sessions (stored in `.grip/history.jsonl`)
+- [ ] DML operations (apply) are recorded in history
+- [ ] EXPLAIN operations are recorded in history
+
+---
+
+## 18. Table Profiling Checklist (v2.4.0)
+
+- [ ] `gR` from grid opens profile for current table
+- [ ] `:GripProfile users` opens profile for users table
+- [ ] Shows per-column sparkline distributions (Unicode block chars)
+- [ ] Shows completeness percentage per column
+- [ ] Shows cardinality (distinct count) per column
+- [ ] Shows min/max values for numeric and date columns
+- [ ] Shows top values with frequency counts
+- [ ] Adapts to narrow terminals (stacked layout)
+- [ ] `q` or `Esc` closes the profile float
+
+---
+
+## 19. Query Doctor Checklist (v2.4.0)
+
+- [ ] `:GripExplain SELECT * FROM users WHERE age > 30` opens Query Health float
+- [ ] Shows severity labels: OK (green), WARN (yellow), SLOW (red)
+- [ ] Shows proportional cost bars (block chars)
+- [ ] Shows actionable tips for slow operations
+- [ ] Shows summary with estimated cost and row count
+- [ ] `gx` from grid runs EXPLAIN on current query
+- [ ] Works on PostgreSQL (cost-based with timing)
+- [ ] Works on SQLite (EXPLAIN QUERY PLAN)
+- [ ] Works on DuckDB (Estimated Cardinality)
+- [ ] `q` or `Esc` closes the explain float
+
+---
+
+## 20. AI SQL Generation Checklist (v2.4.0)
+
+Requires an API key: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, or local Ollama.
+
+- [ ] `gA` from grid opens AI prompt input
+- [ ] `:GripAsk show me the top 5 users by order count` generates SQL
+- [ ] Generated SQL opens in query pad for review
+- [ ] Schema context is auto-assembled (table names, column types)
+- [ ] Works with Anthropic provider (if key set)
+- [ ] Works with OpenAI provider (if key set)
+- [ ] Provider auto-detection follows priority: Anthropic > OpenAI > Gemini > Ollama
+- [ ] Explicit `provider` in setup config overrides auto-detection
+- [ ] Error messages are clear when no API key is available
+
+---
+
+## 21. Query Timer Checklist (v2.4.0)
+
+- [ ] Status line shows query execution time (e.g. `42ms`)
+- [ ] Timer updates on each query (refresh, page change, sort, filter)
+- [ ] Timer shows for all adapters (PG, SQLite, MySQL, DuckDB)
+
+---
+
+## 22. Compact Diff Mode Checklist (v2.4.0)
+
+- [ ] `:GripDiff users users` opens diff view
+- [ ] Auto-selects compact mode on narrow terminals (<120 cols)
+- [ ] `gv` toggles between compact and wide layout
+- [ ] Compact mode shows changes in a stacked format
+- [ ] Wide mode shows side-by-side columns
+- [ ] Color coding: green=added, red=deleted, yellow=changed
 
 ---
 

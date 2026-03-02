@@ -9,12 +9,28 @@
 <p align="center">
 
 ```
-      ██████╗ ██████╗ ██╗██████╗
-     ██╔════╝ ██╔══██╗██║██╔══██╗
-     ██║  ███╗██████╔╝██║██████╔╝
-     ██║   ██║██╔══██╗██║██╔═══╝
-     ╚██████╔╝██║  ██║██║██║
-      ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝
+d   ██████╗ ██████╗ ██╗██████╗
+a  ██╔════╝ ██╔══██╗██║██╔══██╗
+d  ██║  ███╗██████╔╝██║██████╔╝
+b  ██║   ██║██╔══██╗██║██╔═══╝
+o  ╚██████╔╝██║  ██║██║██║
+d   ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝
+
+    ╭──────────────────────╮
+    │                      │
+    │     ◉          ◉     │
+    │                      │
+    │        ◡◡◡◡◡         │
+    │                      │
+    ╰──────────┬───────────╯
+    ╔══════════╧═══════════╗
+    ║ id ║ name ║type║ pk  ║
+    ╠════╬══════╬════╬═════╣
+ ᕦ  ║  1 ║ dad  ║bod ║  ★  ║  ᕤ
+    ║  2 ║ grip ║nvim║  →  ║
+    ╚════╩══════╩════╩═════╝
+     (WOW DAD!!!)~  ᕦ( ᐛ )ᕤ
+       dadbod-grip v2.4.0
 
      DataGrip-style grids for Neovim
      powered by vim-dadbod
@@ -241,6 +257,7 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `gR` | Table profile (sparkline distributions) |
 | `gx` | Query Doctor (plain-English EXPLAIN) |
 | `gD` | Diff against another table |
+| `gv` | Toggle compact/wide diff layout |
 | `gh` | Query history browser |
 | `gE` | Export table (CSV, TSV, JSON, SQL INSERT, Markdown, Grip Table) |
 

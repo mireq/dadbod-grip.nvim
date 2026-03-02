@@ -2460,7 +2460,10 @@ function M._setup_keymaps(bufnr)
         " └──────────────────────────────────────────┘",
         "",
         " ───────────────────────────────────────────",
-        "  dadbod-grip.nvim by Jory Pestorious",
+        "",
+        "  ╔═╦═╦═╗",
+        '  ║d║b║g║  ᕦ( ᐛ )ᕤ  dadbod-grip v2.4.0',
+        "  ╚═╩═╩═╝",
       })
     else
       vim.list_extend(help, {
@@ -2498,7 +2501,10 @@ function M._setup_keymaps(bufnr)
         "          past-date=dim  url=underline",
         "",
         " ───────────────────────────────────────────",
-        "  dadbod-grip.nvim by Jory Pestorious",
+        "",
+        "  ╔═╦═╦═╗",
+        '  ║d║b║g║  ᕦ( ᐛ )ᕤ  dadbod-grip v2.4.0',
+        "  ╚═╩═╩═╝",
       })
     end
     local max_w = 0

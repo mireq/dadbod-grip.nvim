@@ -328,7 +328,7 @@ INSERT INTO type_zoo (
    '\x00', B'00000000', B'0',
    ''::tsvector, 'a | b'::tsquery,
    'empty', 'empty',
-   '(0, 0)', '{0, 0, 0}', '(0,0),(0,0)',
+   '(0, 0)', '{0, 1, 0}', '(0,0),(0,0)',
    '<empty/>'),
   -- row 3: all NULLs
   (NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
