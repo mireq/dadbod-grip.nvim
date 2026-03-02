@@ -562,4 +562,10 @@ just seed-sqlite && just dev-sqlite          # launch with SQLite
 10. `go` -- schema browser opens
 11. `gI` -- properties float opens
 12. `?` -- help popup shows
-13. `q` -- closes everything cleanly
+13. `q` -- opens query pad above grid
+14. Type `UPDATE orders SET status = 'test' WHERE id = 1` + `C-CR`
+15. Mutation preview: 1 row, status blue, title "UPDATE orders (1 row)"
+16. `u` -- cancels mutation, preview closes
+17. `gC` -- connection picker opens
+18. `T` -- type row appears, `w`/`b` navigate columns on type row
+19. `gO` on a read-only query result -- auto-detects table, reopens as editable
