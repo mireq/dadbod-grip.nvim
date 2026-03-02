@@ -493,6 +493,32 @@ function M.get_cell(bufnr)
   return nil
 end
 
+-- ── cursor → column index (works on any row) ────────────────────────────
+-- Uses byte_positions[1] (first data row) as reference since all rows
+-- share the same column geometry.
+local function get_col_index_from_cursor(bufnr)
+  local session = M._sessions[bufnr]
+  if not session or not session._render then return nil end
+  local r = session._render
+  local bp_row = r.byte_positions and r.byte_positions[1]
+  if not bp_row then return nil end
+  local col_nr = vim.api.nvim_win_get_cursor(0)[2]
+  for i, col in ipairs(session.state.columns) do
+    local bp = bp_row[col]
+    if bp and col_nr >= bp.start and col_nr <= bp.finish then
+      return i
+    end
+  end
+  -- Cursor on separator/border — snap to nearest column
+  for i, col in ipairs(session.state.columns) do
+    local bp = bp_row[col]
+    if bp and col_nr < bp.start then
+      return i
+    end
+  end
+  return nil
+end
+
 -- ── open ──────────────────────────────────────────────────────────────────
 -- Creates split, renders initial state, wires keymaps.
 -- Returns bufnr.
@@ -942,10 +968,62 @@ function M._setup_keymaps(bufnr)
 
   -- <CR>: expand cell popup
   map("<CR>", function()
+    local session = M._sessions[bufnr]
+    if not session then return end
     local cell = M.get_cell(bufnr)
     if not cell then
-      vim.notify("Move cursor to a data row to expand", vim.log.levels.INFO)
+      -- On the type row, show column info for the column under cursor
+      local col_idx = get_col_index_from_cursor(bufnr)
+      if col_idx then
+        local st = session.state
+        local col_name = st.columns[col_idx]
+        if not session._column_info and st.table_name then
+          local info, err = db.get_column_info(st.table_name, st.url)
+          if not err then session._column_info = info end
+        end
+        local col_info
+        if session._column_info then
+          for _, ci in ipairs(session._column_info) do
+            if ci.column_name == col_name then col_info = ci; break end
+          end
+        end
+        local lines = { " " .. col_name }
+        lines[#lines + 1] = " " .. string.rep("─", 30)
+        if col_info then
+          lines[#lines + 1] = "  Type: " .. col_info.data_type
+          lines[#lines + 1] = "  Nullable: " .. col_info.is_nullable
+          if col_info.column_default ~= "" then
+            lines[#lines + 1] = "  Default: " .. col_info.column_default
+          end
+          if col_info.constraints ~= "" then
+            lines[#lines + 1] = "  Constraints: " .. col_info.constraints
+          end
+        end
+        local grip_win = vim.api.nvim_get_current_win()
+        open_info_float(grip_win, lines, {
+          title = " Column Info ",
+          relative = "cursor",
+          row = 1, col = 0,
+        })
+      else
+        vim.notify("Move cursor to a data row to expand", vim.log.levels.INFO)
+      end
       return
+    end
+    -- Fetch column info on-demand for type display
+    local st = session.state
+    if not session._column_info and st.table_name then
+      local info, err = db.get_column_info(st.table_name, st.url)
+      if not err then session._column_info = info end
+    end
+    local type_str = ""
+    if session._column_info then
+      for _, ci in ipairs(session._column_info) do
+        if ci.column_name == cell.col_name then
+          type_str = " (" .. ci.data_type .. ")"
+          break
+        end
+      end
     end
     local val = cell.value or "(NULL)"
     local lines = {}
@@ -954,7 +1032,7 @@ function M._setup_keymaps(bufnr)
     end
     local grip_win = vim.api.nvim_get_current_win()
     open_info_float(grip_win, lines, {
-      title = " " .. cell.col_name .. " ",
+      title = " " .. cell.col_name .. type_str .. " ",
       relative = "cursor",
       row = 1, col = 0,
     })
@@ -970,6 +1048,20 @@ function M._setup_keymaps(bufnr)
       return
     end
     local st = session.state
+    -- Fetch column info on-demand for type display
+    if not session._column_info and st.table_name then
+      local info, err = db.get_column_info(st.table_name, st.url)
+      if not err then session._column_info = info end
+    end
+    -- Build type lookup
+    local type_map = {}
+    local max_type_w = 0
+    if session._column_info then
+      for _, ci in ipairs(session._column_info) do
+        type_map[ci.column_name] = ci.data_type
+        max_type_w = math.max(max_type_w, vim.fn.strdisplaywidth(ci.data_type))
+      end
+    end
     local max_name_w = 0
     for _, col in ipairs(st.columns) do
       max_name_w = math.max(max_name_w, vim.fn.strdisplaywidth(col))
@@ -978,8 +1070,14 @@ function M._setup_keymaps(bufnr)
     for _, col in ipairs(st.columns) do
       local val = data.effective_value(st, cell.row_idx, col)
       local display_val = val or "NULL"
-      local pad = string.rep(" ", max_name_w - vim.fn.strdisplaywidth(col))
-      table.insert(lines, " " .. col .. pad .. "   " .. display_val)
+      local name_pad = string.rep(" ", max_name_w - vim.fn.strdisplaywidth(col))
+      if max_type_w > 0 then
+        local dtype = type_map[col] or ""
+        local type_pad = string.rep(" ", max_type_w - vim.fn.strdisplaywidth(dtype))
+        table.insert(lines, " " .. col .. name_pad .. "   " .. dtype .. type_pad .. "   " .. display_val)
+      else
+        table.insert(lines, " " .. col .. name_pad .. "   " .. display_val)
+      end
     end
     local grip_win = vim.api.nvim_get_current_win()
     local _, popup_buf = open_info_float(grip_win, lines, {
@@ -1018,17 +1116,17 @@ function M._setup_keymaps(bufnr)
 
   -- Tab: next column
   map("<Tab>", function()
-    local cell = M.get_cell(bufnr)
-    if not cell then return end
+    local col_idx = get_col_index_from_cursor(bufnr)
+    if not col_idx then return end
     local session = M._sessions[bufnr]
     local r = session._render
     local cols = session.state.columns
     local cursor = vim.api.nvim_win_get_cursor(0)
     local ds = r.data_start or 4
     local row_order_idx = cursor[1] - ds + 1
-    local bp_row = r.byte_positions and r.byte_positions[row_order_idx]
+    local bp_row = r.byte_positions and (r.byte_positions[row_order_idx] or r.byte_positions[1])
     if not bp_row then return end
-    local next_idx = (cell.col_idx % #cols) + 1
+    local next_idx = (col_idx % #cols) + 1
     local target_col = cols[next_idx]
     local target_byte = bp_row[target_col].start
     vim.api.nvim_win_set_cursor(0, { cursor[1], target_byte })
@@ -1036,17 +1134,17 @@ function M._setup_keymaps(bufnr)
 
   -- S-Tab: previous column
   map("<S-Tab>", function()
-    local cell = M.get_cell(bufnr)
-    if not cell then return end
+    local col_idx = get_col_index_from_cursor(bufnr)
+    if not col_idx then return end
     local session = M._sessions[bufnr]
     local r = session._render
     local cols = session.state.columns
     local cursor = vim.api.nvim_win_get_cursor(0)
     local ds = r.data_start or 4
     local row_order_idx = cursor[1] - ds + 1
-    local bp_row = r.byte_positions and r.byte_positions[row_order_idx]
+    local bp_row = r.byte_positions and (r.byte_positions[row_order_idx] or r.byte_positions[1])
     if not bp_row then return end
-    local prev_idx = cell.col_idx == 1 and #cols or cell.col_idx - 1
+    local prev_idx = col_idx == 1 and #cols or col_idx - 1
     local target_col = cols[prev_idx]
     local target_byte = bp_row[target_col].start
     vim.api.nvim_win_set_cursor(0, { cursor[1], target_byte })
@@ -1054,17 +1152,17 @@ function M._setup_keymaps(bufnr)
 
   -- w: next column (alias for Tab)
   map("w", function()
-    local cell = M.get_cell(bufnr)
-    if not cell then return end
+    local col_idx = get_col_index_from_cursor(bufnr)
+    if not col_idx then return end
     local session = M._sessions[bufnr]
     local r = session._render
     local cols = session.state.columns
     local cursor = vim.api.nvim_win_get_cursor(0)
     local ds = r.data_start or 4
     local row_order_idx = cursor[1] - ds + 1
-    local bp_row = r.byte_positions and r.byte_positions[row_order_idx]
+    local bp_row = r.byte_positions and (r.byte_positions[row_order_idx] or r.byte_positions[1])
     if not bp_row then return end
-    local next_idx = (cell.col_idx % #cols) + 1
+    local next_idx = (col_idx % #cols) + 1
     local target_col = cols[next_idx]
     local target_byte = bp_row[target_col].start
     vim.api.nvim_win_set_cursor(0, { cursor[1], target_byte })
@@ -1072,17 +1170,17 @@ function M._setup_keymaps(bufnr)
 
   -- b: previous column (alias for S-Tab)
   map("b", function()
-    local cell = M.get_cell(bufnr)
-    if not cell then return end
+    local col_idx = get_col_index_from_cursor(bufnr)
+    if not col_idx then return end
     local session = M._sessions[bufnr]
     local r = session._render
     local cols = session.state.columns
     local cursor = vim.api.nvim_win_get_cursor(0)
     local ds = r.data_start or 4
     local row_order_idx = cursor[1] - ds + 1
-    local bp_row = r.byte_positions and r.byte_positions[row_order_idx]
+    local bp_row = r.byte_positions and (r.byte_positions[row_order_idx] or r.byte_positions[1])
     if not bp_row then return end
-    local prev_idx = cell.col_idx == 1 and #cols or cell.col_idx - 1
+    local prev_idx = col_idx == 1 and #cols or col_idx - 1
     local target_col = cols[prev_idx]
     local target_byte = bp_row[target_col].start
     vim.api.nvim_win_set_cursor(0, { cursor[1], target_byte })
@@ -1119,7 +1217,7 @@ function M._setup_keymaps(bufnr)
       local cursor = vim.api.nvim_win_get_cursor(0)
       local ds = r.data_start or 4
       local row_order_idx = cursor[1] - ds + 1
-      local bp_row = r.byte_positions and r.byte_positions[row_order_idx]
+      local bp_row = r.byte_positions and (r.byte_positions[row_order_idx] or r.byte_positions[1])
       if not bp_row then return end
       local target_byte = bp_row[cols[1]].start
       vim.api.nvim_win_set_cursor(0, { cursor[1], target_byte })
@@ -1135,7 +1233,7 @@ function M._setup_keymaps(bufnr)
     local cursor = vim.api.nvim_win_get_cursor(0)
     local ds = r.data_start or 4
     local row_order_idx = cursor[1] - ds + 1
-    local bp_row = r.byte_positions and r.byte_positions[row_order_idx]
+    local bp_row = r.byte_positions and (r.byte_positions[row_order_idx] or r.byte_positions[1])
     if not bp_row then return end
     local target_byte = bp_row[cols[#cols]].start
     vim.api.nvim_win_set_cursor(0, { cursor[1], target_byte })
@@ -1298,7 +1396,7 @@ function M._setup_keymaps(bufnr)
         " └──────────────────────────────────────────┘",
         "",
         " ───────────────────────────────────────────",
-        "  dadbod-grip.nvim by Jory Pestorious",
+        "  dadbod-grip.nvim v" .. require("dadbod-grip")._version .. " · Jory Pestorious",
       })
     else
       vim.list_extend(help, {
@@ -1326,7 +1424,7 @@ function M._setup_keymaps(bufnr)
         "  Colors: modified=blue  deleted=red  inserted=green",
         "",
         " ───────────────────────────────────────────",
-        "  dadbod-grip.nvim by Jory Pestorious",
+        "  dadbod-grip.nvim v" .. require("dadbod-grip")._version .. " · Jory Pestorious",
       })
     end
     local max_w = 0

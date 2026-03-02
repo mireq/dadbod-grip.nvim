@@ -8,6 +8,7 @@ local editor = require("dadbod-grip.editor")
 local sql    = require("dadbod-grip.sql")
 
 local M = {}
+M._version = "1.0.0"
 
 -- Default options (overridden by setup)
 local OPTS = {

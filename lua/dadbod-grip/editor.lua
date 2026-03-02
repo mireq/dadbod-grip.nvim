@@ -103,8 +103,10 @@ function M.open(prompt, initial_value, on_save)
   })
 end
 
--- Show an error float (non-interactive, dismissable with any key or CursorMoved).
+-- Show a focused error float. Dismiss with q / <CR> / <Esc>.
 function M.show_error(title, lines)
+  local caller_win = vim.api.nvim_get_current_win()
+
   local max_w = 0
   for _, l in ipairs(lines) do max_w = math.max(max_w, #l) end
   local width = math.min(80, math.max(40, max_w + 4))
@@ -129,7 +131,7 @@ function M.show_error(title, lines)
     end
   end
 
-  local float_win = vim.api.nvim_open_win(err_buf, false, {
+  local float_win = vim.api.nvim_open_win(err_buf, true, {
     relative = "editor",
     row = math.floor((vim.o.lines - #lines - 4) / 2),
     col = math.floor((vim.o.columns - width) / 2),
@@ -141,21 +143,25 @@ function M.show_error(title, lines)
     title_pos = "center",
   })
 
-  -- Auto-dismiss on cursor move or q
-  vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
-    once = true,
-    callback = function()
-      if vim.api.nvim_win_is_valid(float_win) then
-        vim.api.nvim_win_close(float_win, true)
-      end
-    end,
-  })
-
-  vim.keymap.set("n", "q", function()
+  local function dismiss()
     if vim.api.nvim_win_is_valid(float_win) then
       vim.api.nvim_win_close(float_win, true)
     end
-  end, { buffer = err_buf, nowait = true })
+    if vim.api.nvim_win_is_valid(caller_win) then
+      vim.api.nvim_set_current_win(caller_win)
+    end
+  end
+
+  for _, key in ipairs({ "q", "<CR>", "<Esc>" }) do
+    vim.keymap.set("n", key, dismiss, { buffer = err_buf, nowait = true })
+  end
+
+  -- Safety: dismiss if float loses focus (e.g. user clicks away)
+  vim.api.nvim_create_autocmd("WinLeave", {
+    buffer = err_buf,
+    once = true,
+    callback = dismiss,
+  })
 end
 
 return M
