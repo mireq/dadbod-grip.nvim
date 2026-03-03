@@ -196,4 +196,11 @@ function M.explain(sql_str, url)
   return adapter.explain(sql_str, conn)
 end
 
+function M.get_constraints(table_name, url)
+  local adapter, conn, err = resolve(url)
+  if not adapter then return {}, err end
+  if not adapter.get_constraints then return {}, "Adapter does not support get_constraints" end
+  return adapter.get_constraints(table_name, conn)
+end
+
 return M

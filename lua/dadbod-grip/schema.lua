@@ -722,6 +722,27 @@ local function setup_keymaps(url)
     end)
   end)
 
+  -- 1: table picker (mirrors grid keymap)
+  map("1", _pick_table)
+
+  -- Tab views: 2-9 open a table directly into a specific view facet
+  local TAB_VIEWS = { [2]="records", [3]="history", [4]="stats", [5]="explain",
+                      [6]="columns", [7]="fk", [8]="indexes", [9]="constraints" }
+  for n = 2, 9 do
+    local view_name = TAB_VIEWS[n]
+    map(tostring(n), function()
+      local node = node_at_cursor(state)
+      if not node then return end
+      local tbl = (node.kind == "table" and node.name)
+               or (node.kind == "column" and node.table_name)
+      if not tbl then return end
+      local grip = require("dadbod-grip")
+      local target_win = find_right_win()
+      if target_win then vim.api.nvim_set_current_win(target_win) end
+      grip.open(tbl, url, { reuse_win = target_win, view = view_name })
+    end)
+  end
+
   -- Close
   map("<Esc>", function() M.close() end)
 
@@ -742,6 +763,17 @@ local function setup_keymaps(url)
       "  H         Collapse all",
       "  /         Filter by name",
       "  F         Clear filter",
+      "",
+      "  Tab Views",
+      "  1         Table picker",
+      "  2         Records (default)",
+      "  3         Columns",
+      "  4         Foreign Keys",
+      "  5         Indexes",
+      "  6         Constraints",
+      "  7         Column Stats",
+      "  8         History",
+      "  9         Explain",
       "",
       "  Actions",
       "  r         Refresh schema",

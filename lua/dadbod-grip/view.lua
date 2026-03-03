@@ -27,6 +27,29 @@ local NULL_DISPLAY  = "·NULL·"
 local BINARY_PREFIX = "<binary"
 local MAX_COL_WIDTH = 40  -- overridden by setup opts
 
+-- ── tab view system ─────────────────────────────────────────────────────────
+-- Numeric shortcuts: 1=table picker, 2-9=facet views of the current table.
+local VIEW_KEYS = {
+  [2] = "records",
+  [3] = "history",
+  [4] = "stats",
+  [5] = "explain",
+  [6] = "columns",
+  [7] = "fk",
+  [8] = "indexes",
+  [9] = "constraints",
+}
+local VIEW_LABELS = {
+  records     = "Rec",
+  columns     = "Col",
+  fk          = "FK",
+  indexes     = "Idx",
+  constraints = "Con",
+  stats       = "Stat",
+  history     = "Hist",
+  explain     = "Exp",
+}
+
 local SEP_COL = "│"
 local SEP_HDR = "═"
 local SEP_MID = "╪"
@@ -180,7 +203,17 @@ local function title_line(session, columns, widths, total_width)
   local staged = data.count_staged(session.state)
   local badges = {}
   if staged > 0 then table.insert(badges, staged .. " staged") end
-  if session.state.readonly then table.insert(badges, "read-only: no PK") end
+  -- Metadata views: show view name as badge; suppress "read-only: no PK" noise
+  if session.current_view and session.current_view ~= "records" then
+    local vn = session.current_view
+    local full_labels = {
+      columns="Columns", fk="Foreign Keys", indexes="Indexes",
+      constraints="Constraints", stats="Column Stats", history="History", explain="Explain",
+    }
+    table.insert(badges, full_labels[vn] or vn)
+  elseif session.state.readonly then
+    table.insert(badges, "read-only: no PK")
+  end
   if session.query_spec and qmod.has_filters(session.query_spec) then
     table.insert(badges, "filtered")
   end
@@ -562,13 +595,27 @@ local function build_render(session, opts)
 
   -- ── Hint line ──
   local hints
-  if session.pending_mutation then
+  local cv = session.current_view
+  if cv and cv ~= "records" then
+    -- Metadata view: compact tab bar with current view marked (▶)
+    local parts = {}
+    for i = 2, 9 do
+      local vn = VIEW_KEYS[i]
+      local label = VIEW_LABELS[vn] or vn
+      if vn == cv then
+        table.insert(parts, "▶" .. i .. ":" .. label)
+      else
+        table.insert(parts, i .. ":" .. label)
+      end
+    end
+    hints = " " .. table.concat(parts, "  ") .. "  │  r:refresh  q:query  ?:help"
+  elseif session.pending_mutation then
     local mt = session.pending_mutation.type or "SQL"
     hints = " a:execute " .. mt .. "  U:cancel  gs:preview SQL  q:query"
   elseif st.readonly then
-    hints = " r:refresh  Tab/w:col  gy:markdown  gq:saved  q:query  A:ai  gC:connect  ?:help"
+    hints = " r:refresh  Tab/w:col  gy:markdown  gq:saved  q:query  A:ai  2-9:tabs  ?:help"
   else
-    hints = " i:edit  c:clone  d:delete  a:apply  r:refresh  gq:saved  q:query  A:ai  ?:help"
+    hints = " i:edit  c:clone  d:delete  a:apply  r:refresh  gq:saved  q:query  A:ai  2-9:tabs  ?:help"
   end
   table.insert(lines, hints)
 
@@ -1019,6 +1066,340 @@ local function open_info_float(grip_win, lines, float_opts)
   end
 
   return win, popup_buf
+end
+
+-- ── tab view system ──────────────────────────────────────────────────────────
+
+-- Build a minimal read-only state table compatible with build_render.
+-- rows = array of arrays matching the columns order.
+local function make_meta_state(table_name, columns, rows)
+  return {
+    rows            = rows,
+    columns         = columns,
+    pks             = {},
+    table_name      = table_name,
+    changes         = {},
+    deleted         = {},
+    inserted        = {},
+    _next_insert_idx = 1000,
+    readonly        = true,
+  }
+end
+
+-- Update the buffer name to reflect the current view.
+local function update_buf_name(bufnr, table_name, view_name)
+  local base = table_name or "result"
+  local name
+  if view_name and view_name ~= "records" then
+    local full = {
+      columns="Columns", fk="Foreign Keys", indexes="Indexes",
+      constraints="Constraints", stats="Stats", history="History", explain="Explain",
+    }
+    name = "grip://" .. base .. " [" .. (full[view_name] or view_name) .. "]"
+  else
+    name = "grip://" .. base
+  end
+  pcall(vim.api.nvim_buf_set_name, bufnr, name)
+end
+
+-- Per-view data fetchers. Each returns (columns, rows, err).
+local function fetch_view_columns(table_name, url, session)
+  local db_mod = require("dadbod-grip.db")
+  local cols, err = db_mod.get_column_info(table_name, url)
+  if err and not cols then return nil, nil, err end
+  if not cols then return nil, nil, "no column info returned" end
+  local columns = { "column_name", "data_type", "nullable", "default", "key" }
+  local rows = {}
+  for _, c in ipairs(cols) do
+    table.insert(rows, {
+      c.column_name or "",
+      c.data_type or "",
+      c.is_nullable or "",
+      (c.column_default and c.column_default ~= "") and c.column_default or "—",
+      (c.constraints and c.constraints ~= "") and c.constraints or "",
+    })
+  end
+  return columns, rows, nil
+end
+
+local function fetch_view_fk(table_name, url, session)
+  local db_mod = require("dadbod-grip.db")
+  local fks, err = db_mod.get_foreign_keys(table_name, url)
+  if err and not fks then return nil, nil, err end
+  fks = fks or {}
+  local columns = { "direction", "column", "ref_table", "ref_column" }
+  local rows = {}
+  -- Outbound: columns in this table pointing to other tables
+  for _, fk in ipairs(fks) do
+    table.insert(rows, { "→ outbound", fk.column or "", fk.ref_table or "", fk.ref_column or "" })
+  end
+  -- Inbound: other tables that reference this table (best-effort scan)
+  local all_tables = session._schema_tables or {}
+  if next(all_tables) == nil then
+    local tlist, terr = db_mod.list_tables(url)
+    if tlist and not terr then
+      all_tables = tlist
+      session._schema_tables = tlist
+    end
+  end
+  local base_tbl = table_name:match("^[^.]+%.(.+)$") or table_name
+  for _, t in ipairs(all_tables) do
+    if t.name ~= table_name then
+      local other_fks = db_mod.get_foreign_keys(t.name, url)
+      if other_fks then
+        for _, fk in ipairs(other_fks) do
+          if fk.ref_table == table_name or fk.ref_table == base_tbl then
+            table.insert(rows, { "← inbound", t.name .. "." .. (fk.column or ""), table_name, fk.ref_column or "" })
+          end
+        end
+      end
+    end
+  end
+  if #rows == 0 then
+    table.insert(rows, { "(none)", "", "", "" })
+  end
+  return columns, rows, nil
+end
+
+local function fetch_view_indexes(table_name, url, session)
+  local db_mod = require("dadbod-grip.db")
+  local indexes, err = db_mod.get_indexes(table_name, url)
+  if err and not indexes then return nil, nil, err end
+  indexes = indexes or {}
+  local columns = { "index_name", "type", "columns" }
+  local rows = {}
+  for _, idx in ipairs(indexes) do
+    table.insert(rows, {
+      idx.name or "",
+      idx.type or "INDEX",
+      type(idx.columns) == "table" and table.concat(idx.columns, ", ") or (idx.columns or ""),
+    })
+  end
+  if #rows == 0 then
+    table.insert(rows, { "(none)", "", "" })
+  end
+  return columns, rows, nil
+end
+
+local function fetch_view_constraints(table_name, url, session)
+  local db_mod = require("dadbod-grip.db")
+  local constraints, err = db_mod.get_constraints(table_name, url)
+  if err and not constraints then return nil, nil, err end
+  constraints = constraints or {}
+  local columns = { "constraint_name", "type", "definition" }
+  local rows = {}
+  for _, c in ipairs(constraints) do
+    table.insert(rows, { c.name or "", c.type or "", c.definition or "" })
+  end
+  if #rows == 0 then
+    table.insert(rows, { "(none)", "", "" })
+  end
+  return columns, rows, nil
+end
+
+local function fetch_view_stats(table_name, url, session)
+  local db_mod = require("dadbod-grip.db")
+  local cols, err = db_mod.get_column_info(table_name, url)
+  if err and not cols then return nil, nil, err end
+  if not cols or #cols == 0 then return nil, nil, "no columns found" end
+
+  -- Build a UNION ALL query: one row per column with aggregate stats
+  local safe_tbl = table_name:gsub('"', '""')
+  local parts = {}
+  for _, c in ipairs(cols) do
+    local safe_col = c.column_name:gsub('"', '""')
+    local quoted_col = '"' .. safe_col .. '"'
+    local quoted_name = c.column_name:gsub("'", "''")
+    parts[#parts + 1] = string.format(
+      "SELECT '%s' AS col_name, COUNT(*) AS total_rows, COUNT(%s) AS non_null,"
+      .. " COUNT(*) - COUNT(%s) AS null_count, COUNT(DISTINCT %s) AS distinct_count,"
+      .. " CAST(MIN(%s) AS TEXT) AS min_val, CAST(MAX(%s) AS TEXT) AS max_val"
+      .. " FROM \"%s\"",
+      quoted_name, quoted_col, quoted_col, quoted_col, quoted_col, quoted_col, safe_tbl
+    )
+  end
+
+  local stats_sql = table.concat(parts, "\nUNION ALL\n")
+
+  local db_mod = require("dadbod-grip.db")
+  local result, query_err = db_mod.query(stats_sql, url)
+  if query_err then return nil, nil, "Stats query failed: " .. query_err end
+  if not result then return nil, nil, "no stats result" end
+
+  local columns = { "column", "total", "non_null", "nulls", "distinct", "min", "max" }
+  local rows = {}
+  for _, row in ipairs(result.rows) do
+    -- row: col_name, total_rows, non_null, null_count, distinct_count, min_val, max_val
+    local total = tonumber(row[2]) or 0
+    local nulls = tonumber(row[4]) or 0
+    local null_pct = total > 0 and string.format("%.1f%%", (nulls / total) * 100) or "—"
+    table.insert(rows, {
+      row[1] or "",               -- column
+      tostring(total),            -- total
+      tostring(row[3] or ""),     -- non_null
+      null_pct,                   -- nulls (pct)
+      tostring(row[5] or ""),     -- distinct
+      row[6] or "—",              -- min
+      row[7] or "—",              -- max
+    })
+  end
+  return columns, rows, nil
+end
+
+local function fetch_view_explain(table_name, url, session)
+  local db_mod = require("dadbod-grip.db")
+  -- Use current query_sql or fall back to a simple SELECT
+  local query_sql
+  if session.query_spec then
+    query_sql = require("dadbod-grip.query").build_sql(session.query_spec)
+  elseif session.query_sql then
+    query_sql = session.query_sql
+  else
+    query_sql = string.format('SELECT * FROM "%s" LIMIT 100', (table_name or ""):gsub('"', '""'))
+  end
+
+  local result, err = db_mod.explain(query_sql, url)
+  if err then return nil, nil, "EXPLAIN failed: " .. err end
+  if not result then return nil, nil, "no explain result" end
+
+  local columns = { "query_plan" }
+  local rows = {}
+  for _, line in ipairs(result.lines or {}) do
+    table.insert(rows, { line })
+  end
+  if #rows == 0 then
+    table.insert(rows, { "(empty plan)" })
+  end
+  return columns, rows, nil
+end
+
+local VIEW_FETCHERS = {
+  columns     = fetch_view_columns,
+  fk          = fetch_view_fk,
+  indexes     = fetch_view_indexes,
+  constraints = fetch_view_constraints,
+  stats       = fetch_view_stats,
+  explain     = fetch_view_explain,
+}
+
+--- Switch the current grip buffer to a different view facet.
+--- view_name: "records"|"columns"|"fk"|"indexes"|"constraints"|"stats"|"history"|"explain"
+function M.switch_view(bufnr, view_name)
+  local session = M._sessions[bufnr]
+  if not session then return end
+
+  -- Already on this view: show hint rather than silently re-fetching
+  -- (history is excluded — it's a picker, re-opening it is fine)
+  local actual_view = session.current_view or "records"
+  if actual_view == view_name and view_name ~= "history" then
+    local full_labels = {
+      records = "Records", columns = "Columns", fk = "Foreign Keys",
+      indexes = "Indexes", constraints = "Constraints", stats = "Stats", explain = "Explain",
+    }
+    local label = full_labels[view_name] or view_name
+    vim.notify("Already on " .. label .. " · press 2 for Records", vim.log.levels.INFO)
+    return
+  end
+
+  local table_name = session.state and session.state.table_name
+  local url = session.url
+
+  -- Tab 1 is the table picker, handled by the keymap directly (no view switch)
+  if view_name == "records" then
+    -- Save scroll position of current metadata view before switching back
+    local win = vim.fn.bufwinid(bufnr)
+    if win ~= -1 then
+      session.view_cache = session.view_cache or {}
+      local old_cv = session.current_view or "records"
+      session.view_cache[old_cv] = { cursor = vim.api.nvim_win_get_cursor(win) }
+    end
+    session.current_view = "records"
+    -- _records_state always holds the canonical records data
+    local real_state = session._records_state or session.state
+    M.render(bufnr, real_state)
+    -- Restore records cursor if cached
+    local cur_win = vim.fn.bufwinid(bufnr)
+    if cur_win ~= -1 and session.view_cache and session.view_cache["records"] then
+      pcall(vim.api.nvim_win_set_cursor, cur_win, session.view_cache["records"].cursor)
+    end
+    session._meta_state = nil
+    update_buf_name(bufnr, table_name, nil)
+    return
+  end
+
+  if not table_name then
+    vim.notify("Grip: no table in focus for view switching", vim.log.levels.WARN)
+    return
+  end
+
+  -- History opens the grip picker (same as gh) filtered to this table — not a grid
+  if view_name == "history" then
+    require("dadbod-grip.history").pick_for_table(table_name, function(sql_content)
+      require("dadbod-grip.query_pad").open(url, { initial_sql = sql_content })
+    end)
+    return
+  end
+
+  -- Explain opens the Query Health popup (same as gx) — text format is far more readable than a grid
+  if view_name == "explain" then
+    local query_sql
+    if session.query_spec then
+      query_sql = require("dadbod-grip.query").build_sql(session.query_spec)
+    elseif session.query_sql then
+      query_sql = session.query_sql
+    else
+      query_sql = string.format('SELECT * FROM "%s" LIMIT 100', (table_name or ""):gsub('"', '""'))
+    end
+    vim.cmd("GripExplain " .. query_sql)
+    return
+  end
+
+  local fetcher = VIEW_FETCHERS[view_name]
+  if not fetcher then
+    vim.notify("Grip: unknown view '" .. view_name .. "'", vim.log.levels.WARN)
+    return
+  end
+
+  -- Save scroll position of current view before switching
+  local win = vim.fn.bufwinid(bufnr)
+  if win ~= -1 then
+    session.view_cache = session.view_cache or {}
+    local old_cv = session.current_view or "records"
+    session.view_cache[old_cv] = { cursor = vim.api.nvim_win_get_cursor(win) }
+  end
+
+  -- Preserve the canonical records state so it survives the render() call
+  if not session._records_state or session.current_view == nil or session.current_view == "records" then
+    session._records_state = session.state
+  end
+
+  -- Fetch view data
+  vim.notify("Loading " .. (VIEW_LABELS[view_name] or view_name) .. " for " .. table_name .. "...", vim.log.levels.INFO)
+  local columns, rows, err = fetcher(table_name, url, session)
+  if err then
+    vim.notify("Grip " .. view_name .. ": " .. err, vim.log.levels.WARN)
+    return
+  end
+
+  -- Build meta state and render (render sets session.state = meta_state temporarily)
+  local meta_state = make_meta_state(table_name, columns, rows)
+  session.current_view = view_name
+  session._meta_state = meta_state  -- preserved for CR navigation (session.state is restored below)
+  M.render(bufnr, meta_state)
+  -- Restore the canonical records state so keymaps like `r` still work
+  session.state = session._records_state
+
+  -- Update buffer name and restore cached cursor for this view
+  update_buf_name(bufnr, table_name, view_name)
+  local cur_win = vim.fn.bufwinid(bufnr)
+  if cur_win ~= -1 then
+    if session.view_cache and session.view_cache[view_name] then
+      pcall(vim.api.nvim_win_set_cursor, cur_win, session.view_cache[view_name].cursor)
+    else
+      -- Default: top of data
+      pcall(vim.api.nvim_win_set_cursor, cur_win, { 5, 0 })
+    end
+  end
 end
 
 -- ── keymap wiring ─────────────────────────────────────────────────────────
@@ -1643,10 +2024,48 @@ function M._setup_keymaps(bufnr)
     })
   end, "Explain cell")
 
-  -- <CR>: expand cell popup
+  -- <CR>: expand cell popup (suppressed on meta views; FK view navigates to referenced table)
   map("<CR>", function()
     local session_cr = M._sessions[bufnr]
     if not session_cr or not session_cr._render then return end
+
+    -- Meta views: no editing. FK view navigates to the referenced table; others do nothing.
+    local cv = session_cr.current_view
+    if cv and cv ~= "records" then
+      if cv == "fk" then
+        local cell = M.get_cell(bufnr)
+        if cell and cell.row_idx then
+          -- Use _meta_state: session.state was restored to records after render
+          local ms   = session_cr._meta_state
+          local row  = ms and ms.rows[cell.row_idx]
+          local cols = ms and ms.columns
+          if row and cols then
+            local dir_idx, ref_tbl_idx, col_idx
+            for i, c in ipairs(cols) do
+              if c == "direction" then dir_idx = i
+              elseif c == "ref_table" then ref_tbl_idx = i
+              elseif c == "column" then col_idx = i
+              end
+            end
+            local direction = dir_idx and (row[dir_idx] or "") or ""
+            local target
+            if direction:find("outbound", 1, true) and ref_tbl_idx then
+              target = row[ref_tbl_idx]
+            elseif direction:find("inbound", 1, true) and col_idx then
+              -- column value is "tablename.column_name"
+              target = (row[col_idx] or ""):match("^([^.]+)%.")
+            end
+            if target and target ~= "" and target ~= "(none)" then
+              require("dadbod-grip").open(target, session_cr.url)
+              return
+            end
+          end
+        end
+      end
+      -- All other meta views: Enter does nothing (no cell editing in read-only views)
+      return
+    end
+
     local cell = M.get_cell(bufnr)
     if cell then
       -- Data row: edit cell (spreadsheet-style Enter to edit)
@@ -2021,8 +2440,51 @@ function M._setup_keymaps(bufnr)
     vim.api.nvim_win_set_cursor(0, { cursor[1], bp.start })
   end, "Last column")
 
-  -- e: end of current cell (last byte of cell's allocated space; shows truncation point)
-  map("e", function() nav_col(bufnr, 1, true) end, "Next column (land at end of cell)")
+  -- e: vim-like end-of-cell. First moves to end of current cell; when already there, advances.
+  map("e", function()
+    local session_e = M._sessions[bufnr]
+    if not session_e or not session_e._render then return end
+    local r = session_e._render
+    local cols = r.visible_columns or session_e.state.columns
+    if #cols == 0 then return end
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    local data_start = r.data_start or 4
+    local di = cursor[1] - data_start + 1
+    local ref_bp
+    if di < 1 then
+      local type_row_line = r.data_start and (r.data_start - 2)
+      if type_row_line and cursor[1] == type_row_line and r.type_row_byte_positions then
+        ref_bp = r.type_row_byte_positions
+      else
+        ref_bp = r.hdr_byte_positions
+      end
+    elseif r.byte_positions and r.byte_positions[di] then
+      ref_bp = r.byte_positions[di]
+    else
+      ref_bp = r.byte_positions and r.byte_positions[1] or r.hdr_byte_positions
+    end
+    if not ref_bp then return end
+    local col_nr = cursor[2]
+    local current_idx = 1
+    for i, col in ipairs(cols) do
+      local bp = ref_bp[col]
+      if bp and col_nr >= bp.start and col_nr <= bp.finish then
+        current_idx = i
+        break
+      elseif bp and col_nr < bp.start then
+        current_idx = math.max(1, i - 1)
+        break
+      end
+      current_idx = i
+    end
+    local current_col = cols[current_idx]
+    local bp = ref_bp[current_col]
+    if bp and cursor[2] < bp.finish then
+      vim.api.nvim_win_set_cursor(0, { cursor[1], bp.finish })
+    else
+      nav_col(bufnr, 1, true)
+    end
+  end, "End of current cell (then next)")
 
   -- gq: load saved query (open query pad + picker)
   map("gq", function()
@@ -3032,6 +3494,27 @@ function M._setup_keymaps(bufnr)
     ai.ask(s_url)
   end, "AI SQL generation")
 
+  -- ── tab view keymaps (1-9) ───────────────────────────────────────────────
+  -- 1: table picker
+  map("1", function()
+    local picker = require("dadbod-grip.picker")
+    local s_url = M._sessions[bufnr] and M._sessions[bufnr].url
+    picker.pick_table(s_url, function(name)
+      local grip = require("dadbod-grip")
+      grip.open(name, s_url)
+    end)
+  end, "Table picker (tab 1)")
+
+  -- 2-9: view tabs
+  for n = 2, 9 do
+    local view_name = VIEW_KEYS[n]
+    if view_name then
+      map(tostring(n), function()
+        M.switch_view(bufnr, view_name)
+      end, "View: " .. (VIEW_LABELS[view_name] or view_name))
+    end
+  end
+
   -- ?: help popup
   map("?", function()
     local session = M._sessions[bufnr]
@@ -3079,7 +3562,7 @@ function M.show_help(opts)
       "",
       "  Sort / Filter / Pagination",
       "  s         Toggle sort on column (ASC→DESC→off)",
-      "  S         Stack sort on column (stackable — press S on multiple cols for ▲1 ▼2 ▲3)",
+      "  S         Stack sort on column (stackable: press S on multiple cols for ▲1 ▼2 ▲3)",
       "  f         Quick filter by cell value",
       "  <C-f>     Freeform WHERE clause filter",
       "            ↳ e.g.: status = 'active'",
@@ -3105,6 +3588,17 @@ function M.show_help(opts)
       "  gx        Explain current query plan",
       "  gD        Diff against another table",
       "  gE        Export (CSV, TSV, JSON, SQL, Markdown, Grip Table)",
+      "",
+      "  Tab Views (1-9)",
+      "  1         Table picker",
+      "  2         Records (default view)",
+      "  3         Query History: recent queries for this table",
+      "  4         Column Stats: count, nulls%, distinct, min, max",
+      "  5         Explain: query plan for current query",
+      "  6         Columns: name, type, nullable, default, key",
+      "  7         Foreign Keys: outbound and inbound",
+      "  8         Indexes: name, type, columns covered",
+      "  9         Constraints: CHECK, UNIQUE, NOT NULL",
       "",
       "  Schema & Workflow",
       "  go        Toggle schema browser",

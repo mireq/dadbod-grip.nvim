@@ -341,6 +341,122 @@ test("duckdb query: http URL also triggers httpfs", function()
   end)
 end)
 
+-- ── SQLite get_constraints ───────────────────────────────────────────────────
+
+test("sqlite get_constraints: queries sqlite_master with table name", function()
+  local captured_args
+  local orig = vim.system
+  vim.system = function(a)
+    captured_args = a
+    return { wait = function() return { stdout = "", stderr = "", code = 0 } end }
+  end
+  sqlite.get_constraints("users", "sqlite:test.db")
+  vim.system = orig
+  -- sqlite3 args: { "sqlite3", "-csv", "-header", db_path, sql_str }
+  local sql_arg = captured_args[5]
+  contains(sql_arg, "sqlite_master", "queries sqlite_master")
+  contains(sql_arg, "users", "filters by table name")
+end)
+
+test("sqlite get_constraints: parses UNIQUE constraint from DDL", function()
+  local ddl = "sql\nCREATE TABLE users (\n  id INTEGER,\n  email TEXT,\n  UNIQUE (email)\n)"
+  with_system_mock(ddl, "", 0, function()
+    local result = sqlite.get_constraints("users", "sqlite:test.db")
+    local found_unique = false
+    for _, c in ipairs(result) do
+      if c.type == "UNIQUE" then found_unique = true end
+    end
+    assert(found_unique, "should detect UNIQUE constraint in DDL")
+  end)
+end)
+
+test("sqlite get_constraints: parses CHECK constraint from DDL", function()
+  local ddl = "sql\nCREATE TABLE users (\n  id INTEGER,\n  age INTEGER,\n  CHECK (age > 0)\n)"
+  with_system_mock(ddl, "", 0, function()
+    local result = sqlite.get_constraints("users", "sqlite:test.db")
+    local found_check = false
+    for _, c in ipairs(result) do
+      if c.type == "CHECK" then found_check = true end
+    end
+    assert(found_check, "should detect CHECK constraint in DDL")
+  end)
+end)
+
+test("sqlite get_constraints: falls back to DDL entry when no named constraints", function()
+  local ddl = "sql\nCREATE TABLE simple (id INTEGER, name TEXT)"
+  with_system_mock(ddl, "", 0, function()
+    local result = sqlite.get_constraints("simple", "sqlite:test.db")
+    eq(#result, 1, "one fallback entry")
+    eq(result[1].type, "DDL", "fallback type is DDL")
+    contains(result[1].definition, "CREATE TABLE", "definition contains DDL")
+  end)
+end)
+
+test("sqlite get_constraints: returns empty for empty DDL output", function()
+  with_system_mock("", "", 0, function()
+    local result = sqlite.get_constraints("empty", "sqlite:test.db")
+    eq(#result, 0, "empty list for empty output")
+  end)
+end)
+
+-- ── DuckDB get_constraints ───────────────────────────────────────────────────
+
+test("duckdb get_constraints: queries duckdb_constraints() for table", function()
+  with_executable(function()
+    local captured_args
+    local orig = vim.system
+    vim.system = function(a)
+      captured_args = a
+      return { wait = function() return { stdout = "", stderr = "", code = 0 } end }
+    end
+    duckdb.get_constraints("users", "duckdb::memory:")
+    vim.system = orig
+    local sql_arg = captured_args[#captured_args]
+    contains(sql_arg, "duckdb_constraints", "queries duckdb_constraints()")
+    contains(sql_arg, "users", "filters by table name")
+  end)
+end)
+
+test("duckdb get_constraints: filters by schema name", function()
+  with_executable(function()
+    local captured_args
+    local orig = vim.system
+    vim.system = function(a)
+      captured_args = a
+      return { wait = function() return { stdout = "", stderr = "", code = 0 } end }
+    end
+    duckdb.get_constraints("myschema.users", "duckdb:test.db")
+    vim.system = orig
+    local sql_arg = captured_args[#captured_args]
+    contains(sql_arg, "myschema", "includes schema filter")
+    contains(sql_arg, "users", "includes table filter")
+  end)
+end)
+
+test("duckdb get_constraints: parses CSV output into constraint rows", function()
+  with_executable(function()
+    local csv = "constraint_name,constraint_type,definition\nemail_unique,UNIQUE,email\nage_check,CHECK,age > 0\n"
+    with_system_mock(csv, "", 0, function()
+      local result = duckdb.get_constraints("users", "duckdb::memory:")
+      eq(#result, 2, "two constraints parsed")
+      eq(result[1].name, "email_unique", "first constraint name")
+      eq(result[1].type, "UNIQUE", "first constraint type")
+      eq(result[2].name, "age_check", "second constraint name")
+      eq(result[2].type, "CHECK", "second constraint type")
+    end)
+  end)
+end)
+
+test("duckdb get_constraints: returns empty list on query failure", function()
+  with_executable(function()
+    with_system_mock("", "Error: table not found", 1, function()
+      local result, err = duckdb.get_constraints("missing", "duckdb::memory:")
+      eq(#result, 0, "empty list on error")
+      -- error is returned (or nil — either is acceptable since duckdb silences errors)
+    end)
+  end)
+end)
+
 -- ── summary ──────────────────────────────────────────────────────────────────
 
 print(string.format("\nadapter_spec: %d passed, %d failed", pass, fail))

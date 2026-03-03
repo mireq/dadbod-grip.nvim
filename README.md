@@ -34,6 +34,7 @@ Edit data like a GUI. Navigate like Vim. Never leave your editor.
 | **Transaction undo** reverse committed changes | **Live SQL preview** float updates as you stage | **AI SQL** Anthropic · OpenAI · Gemini · Ollama |
 | **Schema browser** `gb` sidebar, PK/FK markers | **Data diff** `gD` compare tables by primary key | **Multi-DB** PostgreSQL · SQLite · MySQL · DuckDB |
 | **Saved queries** project-local `.grip/queries/` | **Export** CSV · TSV · JSON · SQL · Markdown · Table | **Connection profiles** global auto-persist |
+| **Tab views** `1`-`9` History · Stats · Explain · Columns · FK | **Column Stats** `4` null% · distinct · min · max | **Query History** `3` filtered per table |
 
 ## Demo
 
@@ -183,6 +184,24 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `gf` | Follow foreign key under cursor |
 | `<C-o>` | Go back in FK navigation stack |
 
+### Tab Views (1-9)
+
+One keypress switches the current grid between facets of the focused table. The tab bar appears in the hint line and the buffer title updates to show the active view.
+
+| Key | View | Description |
+|-----|------|-------------|
+| `1` | Table picker | Fuzzy-find any table and open it |
+| `2` | Records | Default data grid (returns from any tab) |
+| `3` | Query History | Recent queries filtered to this table |
+| `4` | Column Stats | Count, null%, distinct count, min, max per column |
+| `5` | Explain | Query plan for the current query (Query Doctor popup) |
+| `6` | Columns | Name, type, nullable, default, PK/FK markers |
+| `7` | Foreign Keys | Outbound (this table →) and inbound (→ this table) |
+| `8` | Indexes | Name, type, unique flag, columns covered |
+| `9` | Constraints | CHECK, UNIQUE, NOT NULL constraints |
+
+Keys `2`–`9` also work in the schema sidebar to open any table directly in the selected view.
+
 ### Analysis & Export
 
 | Key | Action |
@@ -259,6 +278,8 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `y` | Yank table or column name |
 | `r` | Refresh schema |
 | `go` | Open table under cursor, ORDER BY latest (created_at / PK DESC) |
+| `1` | Table picker (fuzzy finder) |
+| `2`–`9` | Open table in tab view (Records / History / Stats / Explain / Columns / FK / Indexes / Constraints) |
 | `gT` / `gt` | Table picker (fuzzy finder) |
 | `gb` / `<Esc>` | Close sidebar |
 | `gw` | Jump to grid |

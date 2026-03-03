@@ -261,6 +261,98 @@ test("record: elapsed_ms preserved through dedup", function()
   end)
 end)
 
+-- ── get_for_table ────────────────────────────────────────────────────────────
+
+test("get_for_table: returns entries matching by table field", function()
+  with_mock(function()
+    mock_store = {
+      { sql = "SELECT * FROM users", url = "x", ts = 1, type = "query", ["table"] = "users" },
+      { sql = "SELECT * FROM orders", url = "x", ts = 2, type = "query", ["table"] = "orders" },
+    }
+    local result = history.get_for_table("users")
+    eq(#result, 1, "one match")
+    eq(result[1]["table"], "users", "correct entry returned")
+  end)
+end)
+
+test("get_for_table: returns entries matching by sql content", function()
+  with_mock(function()
+    mock_store = {
+      { sql = "SELECT name FROM users WHERE id = 1", url = "x", ts = 1, type = "query" },
+      { sql = "SELECT * FROM orders", url = "x", ts = 2, type = "query" },
+    }
+    local result = history.get_for_table("users")
+    eq(#result, 1, "one match by sql")
+    contains(result[1].sql, "users", "sql contains table name")
+  end)
+end)
+
+test("get_for_table: returns newest first", function()
+  with_mock(function()
+    mock_store = {
+      { sql = "old users query", url = "x", ts = 1, type = "query", ["table"] = "users" },
+      { sql = "new users query", url = "x", ts = 2, type = "query", ["table"] = "users" },
+    }
+    local result = history.get_for_table("users")
+    eq(result[1].sql, "new users query", "newest first")
+    eq(result[2].sql, "old users query", "oldest second")
+  end)
+end)
+
+test("get_for_table: respects limit parameter", function()
+  with_mock(function()
+    mock_store = {
+      { sql = "q1 users", url = "x", ts = 1, type = "query", ["table"] = "users" },
+      { sql = "q2 users", url = "x", ts = 2, type = "query", ["table"] = "users" },
+      { sql = "q3 users", url = "x", ts = 3, type = "query", ["table"] = "users" },
+    }
+    local result = history.get_for_table("users", 2)
+    eq(#result, 2, "limited to 2")
+    eq(result[1].sql, "q3 users", "newest first within limit")
+  end)
+end)
+
+test("get_for_table: returns empty for nil table_name", function()
+  with_mock(function()
+    mock_store = {
+      { sql = "SELECT * FROM users", url = "x", ts = 1, type = "query", ["table"] = "users" },
+    }
+    local result = history.get_for_table(nil)
+    eq(#result, 0, "empty for nil")
+  end)
+end)
+
+test("get_for_table: returns empty for empty table_name", function()
+  with_mock(function()
+    mock_store = {
+      { sql = "SELECT * FROM users", url = "x", ts = 1, type = "query", ["table"] = "users" },
+    }
+    local result = history.get_for_table("")
+    eq(#result, 0, "empty for empty string")
+  end)
+end)
+
+test("get_for_table: does not return unrelated entries", function()
+  with_mock(function()
+    mock_store = {
+      { sql = "SELECT * FROM orders", url = "x", ts = 1, type = "query", ["table"] = "orders" },
+      { sql = "DELETE FROM products WHERE id = 5", url = "x", ts = 2, type = "dml" },
+    }
+    local result = history.get_for_table("users")
+    eq(#result, 0, "no matches for unrelated table")
+  end)
+end)
+
+test("get_for_table: sql match is case-insensitive", function()
+  with_mock(function()
+    mock_store = {
+      { sql = "SELECT * FROM Users WHERE active = 1", url = "x", ts = 1, type = "query" },
+    }
+    local result = history.get_for_table("users")
+    eq(#result, 1, "case-insensitive sql match")
+  end)
+end)
+
 -- ── summary ─────────────────────────────────────────────────────────────────
 
 print(string.format("\nhistory_spec: %d passed, %d failed", pass, fail))

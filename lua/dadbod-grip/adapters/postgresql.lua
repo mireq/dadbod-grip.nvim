@@ -257,6 +257,53 @@ function M.get_indexes(table_name, url)
   return indexes, nil
 end
 
+function M.get_constraints(table_name, url)
+  local schema, tbl = table_name:match("^([^.]+)%.(.+)$")
+  if not schema then
+    schema = "public"
+    tbl = table_name
+  end
+
+  local sql_str = string.format([[
+    SELECT
+      tc.constraint_name,
+      tc.constraint_type,
+      COALESCE(
+        cc.check_clause,
+        (SELECT string_agg(kcu.column_name, ', ' ORDER BY kcu.ordinal_position)
+         FROM information_schema.key_column_usage kcu
+         WHERE kcu.constraint_name = tc.constraint_name
+           AND kcu.table_schema = tc.table_schema)
+      ) AS definition
+    FROM information_schema.table_constraints tc
+    LEFT JOIN information_schema.check_constraints cc
+      ON cc.constraint_name = tc.constraint_name
+      AND cc.constraint_schema = tc.table_schema
+    WHERE tc.table_schema = '%s'
+      AND tc.table_name = '%s'
+      AND tc.constraint_type IN ('CHECK', 'UNIQUE')
+    ORDER BY tc.constraint_type, tc.constraint_name
+  ]], schema:gsub("'", "''"), tbl:gsub("'", "''"))
+
+  local stdout, stderr, code = psql(url, sql_str)
+  if code ~= 0 then
+    return {}, stderr ~= "" and stderr or "Failed to query constraints"
+  end
+
+  local parsed = db_util.parse_csv(stdout)
+  if not parsed then return {} end
+
+  local constraints = {}
+  for _, row in ipairs(parsed.rows) do
+    table.insert(constraints, {
+      name       = row[1] or "",
+      type       = row[2] or "",
+      definition = row[3] or "",
+    })
+  end
+  return constraints, nil
+end
+
 function M.get_table_stats(table_name, url)
   local schema, tbl = table_name:match("^([^.]+)%.(.+)$")
   if not schema then

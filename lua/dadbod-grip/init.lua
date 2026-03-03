@@ -573,6 +573,27 @@ function M.open(arg, url, opts)
     end
     local stmt_type = mutation_sql:upper():match("^%s*(%u+)") or "SQL"
 
+    -- Unwrap BEGIN/COMMIT (or START TRANSACTION) blocks: extract inner DML for mutation preview.
+    -- Executing just the inner statement is correct — BEGIN/COMMIT is unnecessary for single stmts.
+    if stmt_type == "BEGIN" or stmt_type == "START" then
+      local inner = mutation_sql
+        :gsub("^%s*START%s+TRANSACTION%s*;%s*\n?", "")
+        :gsub("^%s*BEGIN%s*;%s*\n?", "")
+        :gsub("\n?%s*COMMIT%s*;?%s*$", "")
+        :gsub("\n?%s*ROLLBACK%s*;?%s*$", "")
+      inner = inner:match("^%s*(.-)%s*$")
+      if inner and inner ~= "" then
+        local inner_type = inner:upper():match("^%s*(%u+)")
+        if inner_type == "UPDATE" or inner_type == "DELETE" or inner_type == "INSERT"
+            or inner_type == "REPLACE" then
+          local preview_type = inner_type == "REPLACE" and "INSERT" or inner_type
+          M._mutation_preview(inner, exec_conn, preview_type, opts)
+          return
+        end
+      end
+      -- No DML inside — fall through to DDL confirm
+    end
+
     -- For UPDATE/DELETE/INSERT/REPLACE: show preview grid with a:execute / U:cancel
     if stmt_type == "UPDATE" or stmt_type == "DELETE" or stmt_type == "INSERT"
         or stmt_type == "REPLACE" then
@@ -787,6 +808,20 @@ function M.open(arg, url, opts)
       end
     end,
   })
+
+  -- Switch to a specific view if requested via opts.view (number 2-9 or name string)
+  if opts and opts.view then
+    local VIEW_KEYS = { [2]="records", [3]="history", [4]="stats", [5]="explain",
+                        [6]="columns", [7]="fk", [8]="indexes", [9]="constraints" }
+    local view_name = type(opts.view) == "number" and VIEW_KEYS[opts.view]
+                   or type(opts.view) == "string" and opts.view
+                   or nil
+    if view_name then
+      vim.schedule(function()
+        view.switch_view(bufnr, view_name)
+      end)
+    end
+  end
 end
 
 -- ── open_smart ───────────────────────────────────────────────────────────

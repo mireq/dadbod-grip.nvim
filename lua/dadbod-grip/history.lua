@@ -124,6 +124,48 @@ function M.clear()
   M._write_all({})
 end
 
+--- List recent history entries filtered to a specific table, newest first.
+--- Matches entries where entry.table == table_name OR sql contains the table name.
+function M.get_for_table(table_name, limit)
+  if not table_name or table_name == "" then return {} end
+  local all = M._read_all()
+  local result = {}
+  for i = #all, 1, -1 do
+    local e = all[i]
+    if (e["table"] and e["table"] == table_name)
+      or (e.sql and e.sql:lower():find(table_name:lower(), 1, true)) then
+      table.insert(result, e)
+      if limit and #result >= limit then break end
+    end
+  end
+  return result
+end
+
+--- Open a history picker filtered to a specific table. Calls callback(sql, entry).
+function M.pick_for_table(table_name, callback)
+  local entries = M.get_for_table(table_name, 100)
+  if #entries == 0 then
+    vim.notify("Grip: no history for " .. (table_name or "this table"), vim.log.levels.INFO)
+    return
+  end
+  require("dadbod-grip.grip_picker").open({
+    title = "History: " .. (table_name or ""),
+    items = entries,
+    display = function(e)
+      local time_str = os.date("%Y-%m-%d %H:%M", e.ts)
+      local ms_str = e.elapsed_ms and (e.elapsed_ms .. "ms  ") or ""
+      return time_str .. "  " .. ms_str .. e.sql:sub(1, 60):gsub("\n", " ")
+    end,
+    preview = function(e)
+      if not e.sql or e.sql == "" then return { "(no SQL)" } end
+      return vim.split(e.sql, "\n", { plain = true })
+    end,
+    on_select = function(e)
+      callback(e.sql, e)
+    end,
+  })
+end
+
 --- Open a picker to select a history entry. Calls callback(sql, entry).
 function M.pick(callback)
   local entries = M.list(100)

@@ -358,6 +358,52 @@ function M.get_indexes(table_name, url)
   return indexes, nil
 end
 
+function M.get_constraints(table_name, url)
+  local db_path = extract_path(url)
+  if not db_path then return {}, "Invalid DuckDB URL: " .. url end
+
+  local schema, tbl = table_name:match("^([^.]+)%.(.+)$")
+  if not schema then
+    schema = "main"
+    tbl = table_name
+  end
+
+  -- duckdb_constraints() returns CHECK and UNIQUE with column lists and expressions
+  local sql_str = string.format([[
+    SELECT
+      CASE constraint_type
+        WHEN 'CHECK' THEN 'check_' || CAST(rowid AS VARCHAR)
+        ELSE array_to_string(constraint_column_names, ', ')
+      END AS constraint_name,
+      constraint_type,
+      COALESCE(expression, array_to_string(constraint_column_names, ', ')) AS definition
+    FROM duckdb_constraints()
+    WHERE schema_name = '%s'
+      AND table_name = '%s'
+      AND constraint_type IN ('CHECK', 'UNIQUE', 'NOT NULL')
+    ORDER BY constraint_type, constraint_name
+  ]], schema:gsub("'", "''"), tbl:gsub("'", "''"))
+
+  local stdout, stderr, code = duckdb(db_path, sql_str)
+  if code ~= 0 then
+    -- duckdb_constraints() may not exist in older versions
+    return {}, nil
+  end
+
+  local parsed = db_util.parse_csv(stdout)
+  if not parsed then return {} end
+
+  local constraints = {}
+  for _, row in ipairs(parsed.rows) do
+    table.insert(constraints, {
+      name       = row[1] or "",
+      type       = row[2] or "",
+      definition = row[3] or "",
+    })
+  end
+  return constraints, nil
+end
+
 function M.get_table_stats(table_name, url)
   local db_path = extract_path(url)
   if not db_path then return nil, "Invalid DuckDB URL: " .. url end

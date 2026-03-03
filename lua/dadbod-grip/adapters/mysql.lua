@@ -377,6 +377,61 @@ function M.get_indexes(table_name, url)
   return indexes, nil
 end
 
+function M.get_constraints(table_name, url)
+  local parsed = parse_url(url)
+  if not parsed then return {}, "Invalid MySQL URL: " .. url end
+
+  local schema, tbl = table_name:match("^([^.]+)%.(.+)$")
+  if not schema then
+    schema = parsed.dbname
+    tbl = table_name
+  end
+
+  -- MySQL 8.0+ supports CHECK constraints; older versions silently return no rows
+  local sql_str = string.format([[
+    SELECT
+      tc.CONSTRAINT_NAME,
+      tc.CONSTRAINT_TYPE,
+      CASE
+        WHEN tc.CONSTRAINT_TYPE = 'CHECK' THEN (
+          SELECT cc.CHECK_CLAUSE
+          FROM information_schema.CHECK_CONSTRAINTS cc
+          WHERE cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
+            AND cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA
+        )
+        ELSE (
+          SELECT GROUP_CONCAT(kcu.COLUMN_NAME ORDER BY kcu.ORDINAL_POSITION SEPARATOR ', ')
+          FROM information_schema.KEY_COLUMN_USAGE kcu
+          WHERE kcu.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
+            AND kcu.TABLE_SCHEMA = tc.TABLE_SCHEMA
+        )
+      END AS definition
+    FROM information_schema.TABLE_CONSTRAINTS tc
+    WHERE tc.TABLE_SCHEMA = '%s'
+      AND tc.TABLE_NAME = '%s'
+      AND tc.CONSTRAINT_TYPE IN ('CHECK', 'UNIQUE')
+    ORDER BY tc.CONSTRAINT_TYPE, tc.CONSTRAINT_NAME
+  ]], schema:gsub("'", "''"), tbl:gsub("'", "''"))
+
+  local stdout, stderr, code = mysql_query(parsed, sql_str)
+  if code ~= 0 then
+    return {}, stderr ~= "" and stderr or "Failed to query constraints"
+  end
+
+  local result = db_util.parse_csv(stdout)
+  if not result then return {} end
+
+  local constraints = {}
+  for _, row in ipairs(result.rows) do
+    table.insert(constraints, {
+      name       = row[1] or "",
+      type       = row[2] or "",
+      definition = row[3] or "",
+    })
+  end
+  return constraints, nil
+end
+
 function M.get_table_stats(table_name, url)
   local parsed_url = parse_url(url)
   if not parsed_url then return nil, "Invalid MySQL URL: " .. url end

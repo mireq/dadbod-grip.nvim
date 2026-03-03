@@ -228,6 +228,45 @@ function M.get_indexes(table_name, url)
   return indexes, nil
 end
 
+-- SQLite stores constraints inline in the CREATE TABLE DDL; there is no constraint catalog.
+-- Return the raw DDL as a single "constraint" row so users can inspect it.
+function M.get_constraints(table_name, url)
+  local db_path = extract_path(url)
+  if not db_path then return {}, "Invalid SQLite URL: " .. url end
+
+  local tbl = table_name:gsub('^"', ''):gsub('"$', '')
+  tbl = tbl:match("^[^.]+%.(.+)$") or tbl
+
+  local stdout, stderr, code = sqlite3(db_path,
+    string.format("SELECT sql FROM sqlite_master WHERE type='table' AND name='%s'",
+      tbl:gsub("'", "''")))
+  if code ~= 0 then
+    return {}, stderr ~= "" and stderr or "Failed to query DDL"
+  end
+
+  -- Extract UNIQUE and CHECK clauses from CREATE TABLE SQL with a simple scan
+  local ddl = stdout:gsub("^%s+", ""):gsub("%s+$", "")
+  if ddl == "" then return {}, nil end
+
+  local constraints = {}
+  -- Match lines containing UNIQUE or CHECK (not column-level, those are simpler)
+  for line in ddl:gmatch("[^\n]+") do
+    local trimmed = vim.trim(line):gsub(",$", "")
+    if trimmed:upper():match("^UNIQUE") or trimmed:upper():match("^CONSTRAINT.*UNIQUE")
+      or trimmed:upper():match("^CHECK") or trimmed:upper():match("^CONSTRAINT.*CHECK") then
+      local ctype = trimmed:upper():find("UNIQUE") and "UNIQUE" or "CHECK"
+      table.insert(constraints, { name = "(inline)", type = ctype, definition = trimmed })
+    end
+  end
+
+  -- Fallback: return the full DDL for manual inspection when no named constraints found
+  if #constraints == 0 then
+    table.insert(constraints, { name = "(see DDL)", type = "DDL", definition = ddl })
+  end
+
+  return constraints, nil
+end
+
 function M.get_table_stats(table_name, url)
   local db_path = extract_path(url)
   if not db_path then return nil, "Invalid SQLite URL: " .. url end
