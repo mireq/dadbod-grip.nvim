@@ -61,9 +61,9 @@ local function ensure_highlights()
     if vim.fn.hlID(name) == 0 then
       if name == "GripHeader"   then vim.cmd("hi GripHeader gui=bold cterm=bold") end
       if name == "GripNull"     then vim.cmd("hi GripNull gui=italic ctermfg=243 guifg=#6c7086") end
-      if name == "GripModified" then vim.cmd("hi GripModified gui=bold ctermfg=81 guifg=#89dceb") end
-      if name == "GripDeleted"  then vim.cmd("hi GripDeleted gui=strikethrough ctermfg=203 guifg=#f38ba8") end
-      if name == "GripInserted" then vim.cmd("hi GripInserted gui=bold ctermfg=113 guifg=#a6e3a1") end
+      if name == "GripModified" then vim.cmd("hi GripModified gui=bold ctermfg=81 guifg=#89dceb ctermbg=236 guibg=#2d2416") end
+      if name == "GripDeleted"  then vim.cmd("hi GripDeleted gui=strikethrough ctermfg=203 guifg=#f38ba8 ctermbg=236 guibg=#2d1418") end
+      if name == "GripInserted" then vim.cmd("hi GripInserted gui=bold ctermfg=113 guifg=#a6e3a1 ctermbg=236 guibg=#162d18") end
       if name == "GripReadonly" then vim.cmd("hi GripReadonly gui=italic ctermfg=243 guifg=#6c7086") end
       if name == "GripBorder"   then vim.cmd("hi GripBorder gui=bold ctermfg=147 guifg=#cba6f7") end
       if name == "GripStatusChg" then vim.cmd("hi GripStatusChg gui=bold ctermfg=229 guifg=#f9e2af") end
@@ -257,6 +257,19 @@ local function title_line(session, columns, widths, total_width)
   if title_dw > available and available > 4 then
     title = vim.fn.strcharpart(title, 0, available - 1) .. "…"
     title_dw = vim.fn.strdisplaywidth(title)
+  end
+
+  -- If still too wide (e.g. available <= 4 — very narrow grid), show gH hint if it fits
+  if title_dw > available then
+    if inner >= 4 then
+      title = " gH "
+      title_dw = 4
+    else
+      title = ""
+      title_dw = 0
+    end
+    right_trimmed = ""
+    right_dw = 0
   end
 
   local filler = math.max(0, inner - title_dw - right_dw)
@@ -1275,8 +1288,8 @@ function M._setup_keymaps(bufnr)
     vim.notify("Copied as Markdown table (" .. #rows_data .. " rows)", vim.log.levels.INFO)
   end, "Yank table as Markdown")
 
-  -- n: set cell to NULL
-  map("n", function()
+  -- x: set cell to NULL
+  map("x", function()
     local session = M._sessions[bufnr]
     if not session then return end
     if session.state.readonly then
@@ -1366,8 +1379,8 @@ function M._setup_keymaps(bufnr)
     M.apply_edit(bufnr, st)
   end, "Batch toggle delete")
 
-  -- Visual n: set all selected cells to NULL
-  vmap("n", function()
+  -- Visual x: set all selected cells to NULL
+  vmap("x", function()
     local session = M._sessions[bufnr]
     if not session then return end
     if session.state.readonly then
@@ -1523,7 +1536,19 @@ function M._setup_keymaps(bufnr)
       end
     end
     local status = data.row_status(st, cell.row_idx)
-    local is_staged = status == "modified" and st.changes[cell.row_idx] and st.changes[cell.row_idx][cell.col_name] ~= nil
+    local cell_staged = status == "modified"
+      and st.changes[cell.row_idx]
+      and st.changes[cell.row_idx][cell.col_name] ~= nil
+    local display_status
+    if status == "deleted" then
+      display_status = "deleted"
+    elseif status == "inserted" then
+      display_status = "inserted"
+    elseif cell_staged then
+      display_status = "staged"
+    else
+      display_status = "original"
+    end
     local lines = { " " .. cell.col_name }
     lines[#lines + 1] = " " .. string.rep("─", 30)
     if col_info then
@@ -1537,7 +1562,7 @@ function M._setup_keymaps(bufnr)
       end
     end
     lines[#lines + 1] = "  Value: " .. (cell.value or "NULL")
-    lines[#lines + 1] = "  Status: " .. (is_staged and "staged" or "original")
+    lines[#lines + 1] = "  Status: " .. display_status
     local grip_win = vim.api.nvim_get_current_win()
     open_info_float(grip_win, lines, {
       title = " Cell Info ",
@@ -2433,52 +2458,66 @@ function M._setup_keymaps(bufnr)
 
   -- ── aggregate / column stats / export keymaps ─────────────────────────
 
-  -- ga: aggregate selected cells (works after visual selection)
+  -- ga: aggregate current column (normal: all rows, visual: selected rows)
   map("ga", function()
     local session_a = M._sessions[bufnr]
     if not session_a or not session_a._render then return end
     local r = session_a._render
     local st_a = session_a.state
 
-    -- Get visual selection range (uses '< and '> marks)
-    local start_line = vim.fn.line("'<")
-    local end_line = vim.fn.line("'>")
-    local ds = r.data_start or 4
-    if start_line == 0 or end_line == 0 then
-      -- No visual selection — use current cell
+    -- Determine which column to aggregate from cursor position
+    local col_name
+    do
       local cell = M.get_cell(bufnr)
-      if not cell then
-        vim.notify("Select cells first (visual mode) or position on a cell", vim.log.levels.INFO)
+      if cell then
+        col_name = cell.col_name
+      else
+        -- Cursor may be on header/type row — resolve via byte position
+        local col_nr = vim.api.nvim_win_get_cursor(0)[2]
+        local cols = r.visible_columns or st_a.columns
+        if r.hdr_byte_positions then
+          local snapped = M._snap_col(cols, r.hdr_byte_positions, col_nr)
+          if snapped then col_name = snapped.col_name end
+        end
+      end
+      if not col_name then
+        vim.notify("Move cursor to a column first", vim.log.levels.INFO)
         return
       end
-      start_line = vim.api.nvim_win_get_cursor(0)[1]
-      end_line = start_line
     end
 
-    -- Collect values from selected rows
+    -- Get row range: visual selection or all data rows
+    local start_line = vim.fn.line("'<")
+    local end_line   = vim.fn.line("'>")
+    local ds = r.data_start or 4
+    if start_line == 0 or end_line == 0 then
+      -- No visual selection — aggregate entire column
+      start_line = ds
+      end_line = ds + #r.ordered - 1
+    end
+
+    -- Collect values for the single column
     local values = {}
     local numeric_values = {}
     for line = start_line, end_line do
       local row_order = line - ds + 1
       if row_order >= 1 and row_order <= #r.ordered then
         local row_idx = r.ordered[row_order]
-        for _, col in ipairs(st_a.columns) do
-          local val = data.effective_value(st_a, row_idx, col)
-          if val ~= nil then
-            table.insert(values, val)
-            local num = tonumber(val)
-            if num then table.insert(numeric_values, num) end
-          end
+        local val = data.effective_value(st_a, row_idx, col_name)
+        if val ~= nil then
+          table.insert(values, val)
+          local num = tonumber(val)
+          if num then table.insert(numeric_values, num) end
         end
       end
     end
 
     if #values == 0 then
-      vim.notify("No values in selection", vim.log.levels.INFO)
+      vim.notify("ga: " .. col_name .. " — no values", vim.log.levels.INFO)
       return
     end
 
-    local agg_parts = { "Count: " .. #values }
+    local agg_parts = { "ga: " .. col_name .. "  Count: " .. #values }
     if #numeric_values > 0 then
       local sum = 0
       local min_v, max_v = numeric_values[1], numeric_values[1]
@@ -2495,7 +2534,7 @@ function M._setup_keymaps(bufnr)
     end
 
     vim.notify(table.concat(agg_parts, "  │  "), vim.log.levels.INFO)
-  end, "Aggregate selected cells")
+  end, "Aggregate current column")
 
   -- gS: column statistics
   map("gS", function()
@@ -2983,7 +3022,7 @@ function M.show_help(opts)
         "",
         "  Editing",
         "  <CR> / i  Edit cell under cursor",
-        "  n         Set cell to NULL",
+        "  x         Set cell to NULL",
         "  p         Paste clipboard into cell",
         "  P         Paste multi-line into rows",
         "  o         Insert new row after cursor",
@@ -2997,7 +3036,7 @@ function M.show_help(opts)
         "  Batch Edit (visual mode)",
         "  e         Set selected cells to same value",
         "  d         Toggle delete on selected rows",
-        "  n         Set selected cells to NULL",
+        "  x         Set selected cells to NULL",
         "  y         Yank selected cells in column",
         "",
         "  Inspection",

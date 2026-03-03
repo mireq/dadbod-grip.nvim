@@ -266,9 +266,14 @@ function M.pick()
     return
   end
 
+  local max_name = 0
+  for _, c in ipairs(conns) do
+    max_name = math.max(max_name, vim.fn.strdisplaywidth(c.name))
+  end
   local labels = {}
   for _, c in ipairs(conns) do
-    table.insert(labels, c.name .. "  " .. c.url)
+    local pad = string.rep(" ", max_name - vim.fn.strdisplaywidth(c.name))
+    table.insert(labels, c.name .. pad .. "  " .. c.url)
   end
   table.insert(labels, "+ New connection...")
 

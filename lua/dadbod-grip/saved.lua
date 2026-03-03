@@ -164,6 +164,8 @@ local function fzf_pick(queries, callback)
   fzf.fzf_exec(names, {
     prompt = "Grip Queries> ",
     previewer = false,
+    header = "  <Enter> Load  |  <C-d> Delete",
+    keymap = { fzf = { ["ctrl-d"] = "accept" } },
     actions = {
       ["default"] = function(selected)
         if selected and selected[1] then

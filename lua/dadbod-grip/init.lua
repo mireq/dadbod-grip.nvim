@@ -125,7 +125,9 @@ local function do_apply(bufnr, url)
 
   -- Wrap in transaction for atomicity (all or nothing)
   local txn_sql = "BEGIN;\n" .. table.concat(stmts, ";\n") .. ";\nCOMMIT;"
+  local t_apply = vim.uv.hrtime()
   local _, err = db.execute(txn_sql, url)
+  local apply_ms = math.floor((vim.uv.hrtime() - t_apply) / 1e6)
 
   if err then
     -- Transaction failed — DB auto-rolled back
@@ -195,6 +197,7 @@ local function do_apply(bufnr, url)
   local history = require("dadbod-grip.history")
   history.record({ sql = txn_sql, url = url, table_name = st.table_name, type = "dml" })
 
+  session.elapsed_ms = apply_ms
   session.on_refresh(bufnr)
 end
 

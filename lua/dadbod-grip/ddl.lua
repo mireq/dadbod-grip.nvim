@@ -140,6 +140,30 @@ function M.rename_column(table_name, old_name, url, on_done)
   end)
 end
 
+-- ── table rename ────────────────────────────────────────────────────────────
+
+function M.rename_table(old_name, url, on_done)
+  vim.ui.input({ prompt = "Rename table '" .. old_name .. "' to: " }, function(new_name)
+    if not new_name or new_name == "" or new_name == old_name then return end
+
+    local ddl_sql = string.format(
+      'ALTER TABLE %s RENAME TO %s',
+      sql.quote_ident(old_name),
+      sql.quote_ident(new_name)
+    )
+
+    confirm_ddl("Rename Table", ddl_sql, function()
+      local _, err = db.execute(ddl_sql, url)
+      if err then
+        vim.notify("Rename failed: " .. err, vim.log.levels.ERROR)
+        return
+      end
+      vim.notify("Renamed table '" .. old_name .. "' → '" .. new_name .. "'", vim.log.levels.INFO)
+      if on_done then on_done() end
+    end)
+  end)
+end
+
 -- ── column add ──────────────────────────────────────────────────────────────
 
 function M.add_column(table_name, url, on_done)

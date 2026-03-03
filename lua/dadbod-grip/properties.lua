@@ -190,7 +190,7 @@ local function build_lines(props)
   end
 
   -- Footer
-  add("  q close   R rename   + add col   - drop col   gI refresh")
+  add("  q close   R rename col   T rename tbl   + add col   D drop col   gI refresh")
 
   return lines, hl_marks, col_line_map
 end
@@ -295,8 +295,20 @@ function M.open(table_name, url, grip_win)
     end)
   end, { buffer = popup_buf })
 
-  -- x: drop column under cursor
-  vim.keymap.set("n", "x", function()
+  -- T: rename table
+  vim.keymap.set("n", "T", function()
+    if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
+    if vim.api.nvim_win_is_valid(caller_win) then
+      vim.api.nvim_set_current_win(caller_win)
+    end
+    local ddl = require("dadbod-grip.ddl")
+    ddl.rename_table(table_name, url, function()
+      refresh_grip_buffers(table_name)
+    end)
+  end, { buffer = popup_buf })
+
+  -- D: drop column under cursor
+  vim.keymap.set("n", "D", function()
     local col_name = cursor_column()
     if not col_name then
       vim.notify("Move cursor to a column row", vim.log.levels.INFO)
