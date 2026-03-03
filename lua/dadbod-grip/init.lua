@@ -303,7 +303,7 @@ local function do_edit(bufnr, cell, url)
 end
 
 -- ── mutation preview ──────────────────────────────────────────────────────
--- Shows affected rows in a grid before executing UPDATE/DELETE.
+-- Shows affected rows in a grid before executing UPDATE/DELETE/INSERT.
 function M._mutation_preview(mutation_sql, url, stmt_type, caller_opts)
   local sql_mod = require("dadbod-grip.sql")
 
@@ -319,6 +319,10 @@ function M._mutation_preview(mutation_sql, url, stmt_type, caller_opts)
     table_name = flat:match('[Ff][Rr][Oo][Mm]%s+"([^"]+)"')
       or flat:match("[Ff][Rr][Oo][Mm]%s+`([^`]+)`")
       or flat:match("[Ff][Rr][Oo][Mm]%s+([%w_%.]+)")
+  elseif stmt_type == "INSERT" then
+    table_name = flat:match('[Ii][Nn][Ss][Ee][Rr][Tt]%s+[Ii][Nn][Tt][Oo]%s+"([^"]+)"')
+      or flat:match("[Ii][Nn][Ss][Ee][Rr][Tt]%s+[Ii][Nn][Tt][Oo]%s+`([^`]+)`")
+      or flat:match("[Ii][Nn][Ss][Ee][Rr][Tt]%s+[Ii][Nn][Tt][Oo]%s+([%w_%.]+)")
   end
 
   if not table_name then
@@ -326,16 +330,19 @@ function M._mutation_preview(mutation_sql, url, stmt_type, caller_opts)
     return
   end
 
-  -- Extract WHERE clause
-  local where = flat:match("[Ww][Hh][Ee][Rr][Ee]%s+(.+)$")
-  if where then
-    where = where:gsub("%s*;%s*$", "")
-    -- Strip trailing ORDER BY, LIMIT etc.
-    where = where:gsub("%s+[Oo][Rr][Dd][Ee][Rr]%s+[Bb][Yy].*$", "")
-    where = where:gsub("%s+[Ll][Ii][Mm][Ii][Tt]%s+.*$", "")
+  -- Extract WHERE clause (not applicable for INSERT)
+  local where
+  if stmt_type ~= "INSERT" then
+    where = flat:match("[Ww][Hh][Ee][Rr][Ee]%s+(.+)$")
+    if where then
+      where = where:gsub("%s*;%s*$", "")
+      -- Strip trailing ORDER BY, LIMIT etc.
+      where = where:gsub("%s+[Oo][Rr][Dd][Ee][Rr]%s+[Bb][Yy].*$", "")
+      where = where:gsub("%s+[Ll][Ii][Mm][Ii][Tt]%s+.*$", "")
+    end
   end
 
-  -- Build preview SELECT
+  -- Build preview SELECT (INSERT shows full current table state)
   local preview_sql = "SELECT * FROM " .. sql_mod.quote_ident(table_name)
   if where and where ~= "" then
     preview_sql = preview_sql .. " WHERE " .. where
@@ -417,8 +424,12 @@ function M._mutation_preview(mutation_sql, url, stmt_type, caller_opts)
   if session then
     session.pending_mutation = view_opts.pending_mutation
     session.query_spec = query.new_raw(preview_sql, OPTS.limit)
-    session._mutation_title = string.format("%s %s (%d row%s)",
-      stmt_type, table_name, row_count, row_count == 1 and "" or "s")
+    if stmt_type == "INSERT" then
+      session._mutation_title = string.format("INSERT into %s (current state)", table_name)
+    else
+      session._mutation_title = string.format("%s %s (%d row%s)",
+        stmt_type, table_name, row_count, row_count == 1 and "" or "s")
+    end
 
     -- Wire refresh callback so grid updates after mutation executes
     view.set_callbacks(bufnr, {
@@ -452,13 +463,13 @@ function M.open(arg, url, opts)
     end
     local stmt_type = mutation_sql:upper():match("^%s*(%u+)") or "SQL"
 
-    -- For UPDATE/DELETE: show preview of affected rows first
-    if stmt_type == "UPDATE" or stmt_type == "DELETE" then
+    -- For UPDATE/DELETE/INSERT: show preview grid with a:execute / U:cancel
+    if stmt_type == "UPDATE" or stmt_type == "DELETE" or stmt_type == "INSERT" then
       M._mutation_preview(mutation_sql, exec_conn, stmt_type, opts)
       return
     end
 
-    -- For INSERT/DDL: confirm then execute
+    -- For DDL (ALTER/DROP/CREATE/etc.): confirm then execute
     local label = stmt_type == "INSERT" and "Execute INSERT?" or ("Execute " .. stmt_type .. "?")
     local choice = vim.fn.confirm(label .. "\n\n" .. mutation_sql:sub(1, 200), "&Execute\n&Cancel", 2)
     if choice ~= 1 then return end
