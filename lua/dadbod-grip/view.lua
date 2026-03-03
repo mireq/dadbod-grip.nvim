@@ -2737,7 +2737,7 @@ function M._setup_keymaps(bufnr)
         for _, row in ipairs(rows_data) do
           local parts = {}
           for _, v in ipairs(row) do
-            table.insert(parts, (v or ""):gsub("|", "\\|"))
+            table.insert(parts, (tostring(v or ""):gsub("|", "\\|")))
           end
           table.insert(lines_out, "| " .. table.concat(parts, " | ") .. " |")
         end
@@ -2750,7 +2750,7 @@ function M._setup_keymaps(bufnr)
         end
         for _, row in ipairs(rows_data) do
           for ci, v in ipairs(row) do
-            widths[ci] = math.max(widths[ci], vim.fn.strdisplaywidth(v or "NULL"))
+            widths[ci] = math.max(widths[ci], vim.fn.strdisplaywidth(tostring(v or "NULL")))
           end
         end
         -- Top border: ╔════╤════╗
