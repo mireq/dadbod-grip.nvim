@@ -151,6 +151,11 @@ local function setup_keymaps(bufnr, url)
     end)
   end, { buffer = bufnr, silent = true, desc = "Grip: query history" })
 
+  -- ?: help popup (same full grid help — useful for keymap reference while writing SQL)
+  vim.keymap.set("n", "?", function()
+    require("dadbod-grip.view").show_help()
+  end, { buffer = bufnr, silent = true, desc = "Grip: help" })
+
   -- gC / <C-g>: switch database connection
   local function _pick_conn()
     require("dadbod-grip.connections").pick()

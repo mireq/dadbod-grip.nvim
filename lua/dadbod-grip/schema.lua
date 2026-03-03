@@ -2,7 +2,8 @@
 -- Tables/views with expandable columns showing types + PK/FK markers.
 -- Lazy column fetching on expand.
 
-local db = require("dadbod-grip.db")
+local db      = require("dadbod-grip.db")
+local VERSION = require("dadbod-grip.version")
 
 local M = {}
 
@@ -486,26 +487,65 @@ local function setup_keymaps(url)
 
   -- Help
   map("?", function()
-    local help = {
-      " Schema Browser",
-      " ──────────────",
-      " <CR>     Open table in grid (reuse window)",
-      " S-CR     Open table in new split",
-      " l / zo   Expand table columns",
-      " h / zc   Collapse table",
-      " L        Expand all",
-      " H        Collapse all",
-      " /        Filter by name",
-      " r        Refresh schema",
-      " gT       Table picker",
-      " gw       Jump to grid",
-      " gC/<C-g> Switch connection",
-      " q        Query pad",
-      " D        Drop table (confirm)",
-      " +        Create table",
-      " Esc      Close",
+    local lines = {
+      "",
+      "  Schema Browser",
+      " ─────────────────────────────────────────",
+      "",
+      "  Navigation",
+      "  j/k       Move between items",
+      "  <CR>      Open table in grid (reuse win)",
+      "  S-CR      Open table in new split",
+      "  l / zo    Expand table columns",
+      "  h / zc    Collapse table",
+      "  L         Expand all",
+      "  H         Collapse all",
+      "  /         Filter by name",
+      "",
+      "  Actions",
+      "  r         Refresh schema",
+      "  gT        Table picker",
+      "  gw        Jump to grid",
+      "  gC/<C-g>  Switch connection",
+      "  q         Query pad",
+      "  D         Drop table (confirm)",
+      "  +         Create table",
+      "  Esc       Close sidebar",
+      "  ?         Toggle this help",
+      "",
+      " ─────────────────────────────────────────",
+      "",
+      "  ╔═╦═╦═╗",
+      "  ║d║b║g║  ᕦ( ᐛ )ᕤ  dadbod-grip v" .. VERSION,
+      "  ╚═╩═╩═╝",
+      "",
     }
-    vim.notify(table.concat(help, "\n"), vim.log.levels.INFO)
+    local grip_win = vim.api.nvim_get_current_win()
+    local max_w = 0
+    for _, line in ipairs(lines) do max_w = math.max(max_w, #line) end
+    max_w = math.max(max_w + 2, 44)
+    local popup_buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(popup_buf, 0, -1, false, lines)
+    local win = vim.api.nvim_open_win(popup_buf, true, {
+      relative = "editor",
+      row = math.floor((vim.o.lines - #lines) / 2),
+      col = math.floor((vim.o.columns - max_w) / 2),
+      width = max_w,
+      height = #lines,
+      style = "minimal",
+      border = "rounded",
+      title = " Schema Help ",
+      title_pos = "center",
+      zindex = 50,
+    })
+    for _, key in ipairs({ "q", "?", "<Esc>" }) do
+      vim.keymap.set("n", key, function()
+        if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
+        if vim.api.nvim_win_is_valid(grip_win) then
+          vim.api.nvim_set_current_win(grip_win)
+        end
+      end, { buffer = popup_buf })
+    end
   end)
 end
 

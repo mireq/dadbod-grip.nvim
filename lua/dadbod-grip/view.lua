@@ -1,11 +1,12 @@
 -- view.lua — buffer rendering + keymaps.
 -- One buffer per grip session. State in M._sessions[bufnr].
 
-local data   = require("dadbod-grip.data")
-local sql    = require("dadbod-grip.sql")
-local db     = require("dadbod-grip.db")
-local qmod   = require("dadbod-grip.query")
-local editor = require("dadbod-grip.editor")
+local data    = require("dadbod-grip.data")
+local sql     = require("dadbod-grip.sql")
+local db      = require("dadbod-grip.db")
+local qmod    = require("dadbod-grip.query")
+local editor  = require("dadbod-grip.editor")
+local VERSION = require("dadbod-grip.version")
 
 local M = {}
 M._sessions = {}  -- [bufnr] = { state, url, query_sql }
@@ -2727,10 +2728,18 @@ function M._setup_keymaps(bufnr)
 
   -- ?: help popup
   map("?", function()
-    local grip_win = vim.api.nvim_get_current_win()  -- save for restore on close
     local session = M._sessions[bufnr]
-    local ro = session and session.state.readonly
-    local help = {
+    M.show_help({ readonly = session and session.state.readonly })
+  end, "Show help")
+end
+
+--- Open the full help popup. Called from grid, query pad, and schema sidebar.
+--- opts.readonly = true → show read-only notice instead of editing section.
+function M.show_help(opts)
+  opts = opts or {}
+  local grip_win = vim.api.nvim_get_current_win()
+  local ro = opts.readonly
+  local help = {
       "",
       "          ██████╗ ██████╗ ██╗██████╗ ",
       "         ██╔════╝ ██╔══██╗██║██╔══██╗",
@@ -2812,7 +2821,7 @@ function M._setup_keymaps(bufnr)
         " ───────────────────────────────────────────",
         "",
         "  ╔═╦═╦═╗",
-        '  ║d║b║g║  ᕦ( ᐛ )ᕤ  dadbod-grip v2.5.0',
+        '  ║d║b║g║  ᕦ( ᐛ )ᕤ  dadbod-grip v' .. VERSION,
         "  ╚═╩═╩═╝",
       })
     else
@@ -2855,7 +2864,7 @@ function M._setup_keymaps(bufnr)
         " ───────────────────────────────────────────",
         "",
         "  ╔═╦═╦═╗",
-        '  ║d║b║g║  ᕦ( ᐛ )ᕤ  dadbod-grip v2.5.0',
+        '  ║d║b║g║  ᕦ( ᐛ )ᕤ  dadbod-grip v' .. VERSION,
         "  ╚═╩═╩═╝",
       })
     end
@@ -2884,7 +2893,6 @@ function M._setup_keymaps(bufnr)
         end
       end, { buffer = popup_buf })
     end
-  end, "Show help")
 end
 
 -- Register callbacks for edit/delete/insert/apply/refresh from init.

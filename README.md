@@ -1,50 +1,37 @@
 # dadbod-grip.nvim
 
-<p align="center">
-  <a href="https://github.com/joryeugene/dadbod-grip.nvim/blob/main/LICENSE"><img src="https://img.shields.io/github/license/joryeugene/dadbod-grip.nvim.svg" alt="MIT License"></a>
-  <img src="https://img.shields.io/badge/Neovim-0.10%2B-green.svg" alt="Neovim 0.10+">
-  <img src="https://img.shields.io/badge/requires-vim--dadbod-blue.svg" alt="requires vim-dadbod">
-</p>
-
-<p align="center">
-
-```
+<table><tr>
+<td valign="middle">
+<pre>
 d   ██████╗ ██████╗ ██╗██████╗
 a  ██╔════╝ ██╔══██╗██║██╔══██╗
 d  ██║  ███╗██████╔╝██║██████╔╝
 b  ██║   ██║██╔══██╗██║██╔═══╝
 o  ╚██████╔╝██║  ██║██║██║
 d   ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝
-
-    ╭──────────────────────╮
-    │                      │
-    │     ◉          ◉     │
-    │                      │
-    │        ◡◡◡◡◡         │
-    │                      │
-    ╰──────────┬───────────╯
-    ╔══════════╧═══════════╗
-    ║ id ║ name ║type║ pk  ║
-    ╠════╬══════╬════╬═════╣
- ᕦ  ║  1 ║ dad  ║bod ║  ★  ║  ᕤ
-    ║  2 ║ grip ║nvim║  →  ║
-    ╚════╩══════╩════╩═════╝
-
-     (WOW DAD!!!)~  ᕦ( ᐛ )ᕤ
-
-       dadbod-grip v2.5.0
-
-     DataGrip-style grids for Neovim
-     powered by vim-dadbod
-```
-
+</pre>
+<p>
+<a href="https://github.com/joryeugene/dadbod-grip.nvim/blob/main/LICENSE"><img src="https://img.shields.io/github/license/joryeugene/dadbod-grip.nvim.svg" alt="MIT License"></a>&nbsp;
+<img src="https://img.shields.io/badge/Neovim-0.10%2B-green.svg" alt="Neovim 0.10+">&nbsp;
+<img src="https://img.shields.io/badge/requires-vim--dadbod-blue.svg" alt="requires vim-dadbod">
 </p>
+<b>DataGrip-grade database editing, inside Neovim.</b><br>
+Edit data like a GUI. Navigate like Vim. Never leave your editor.
+</td>
+<td align="center" valign="middle" width="180">
+<img src="assets/mascot.gif" width="160" alt="Chonk the dadbod-grip mascot"><br>
+<sub><b>Chonk</b> ᕦ( ᐛ )ᕤ</sub>
+</td>
+</tr></table>
 
-<p align="center">
-  <img src="assets/mascot.gif" width="120" alt="Chonk the dadbod-grip mascot"><br>
-  <sub><b>Chonk</b> ᕦ( ᐛ )ᕤ</sub>
-</p>
+**Edit database tables like Vim buffers.** Visual staging with color-coded rows: modified in blue, inserted green, deleted red. A live SQL float updates as you stage changes. Preview the full mutation SQL before it touches the DB, then apply in a single transaction. Follow foreign keys through a breadcrumb trail. Open Parquet files and remote CSVs as live tables. Profile column distributions with sparklines. Get plain-English EXPLAIN. Generate SQL from natural language across four AI providers. Undo committed transactions. Every Vim motion works. Nothing installs outside Neovim.
 
+| **Editing** | **Analysis** | **Schema & AI** |
+|---|---|---|
+| **Inline cell editing** popup editor | **Data profiling** sparkline distributions | **FK navigation** breadcrumb trail |
+| **Batch edit** visual-mode multi-row ops | **Query Doctor** plain-English EXPLAIN | **DDL** create · rename · drop via UI |
+| **Mutation preview** full SQL before apply | **Visual staging** blue · green · red rows | **File as table** Parquet · CSV · remote URLs |
+| **Transaction undo** reverse committed changes | **Live SQL preview** float updates as you stage | **AI SQL** Anthropic · OpenAI · Gemini · Ollama |
 
 ## Quickstart
 
@@ -548,3 +535,14 @@ Open each table with `:Grip <table_name>` and verify rendering, editing, sort/fi
 - [neosql.nvim](https://github.com/h4kbas/neosql.nvim) is a Lua-based cell editor for PostgreSQL only.
 - [nvim-dbee](https://github.com/kndndrj/nvim-dbee) uses a Go binary backend with columnar display.
 - [lazysql](https://github.com/jorgerojas26/lazysql) is a standalone Go TUI database client.
+
+---
+
+<p align="center"><pre>
+╔══╦══════════╦══════════════════╦═════╗
+║  ║ name     ║ email            ║ age ║
+╠══╬══════════╬══════════════════╬═════╣
+║  ║ chonk    ║ chonk@dadbod.vim ║  37 ║
+╚══╩══════════╩══════════════════╩═════╝
+</pre>
+<sub><b>dadbod-grip.nvim</b> · edit data like a vim buffer · <a href="https://github.com/joryeugene/dadbod-grip.nvim">github</a></sub></p>

@@ -9,7 +9,7 @@ local sql    = require("dadbod-grip.sql")
 local query  = require("dadbod-grip.query")
 
 local M = {}
-M._version = "2.5.0"
+M._version = require("dadbod-grip.version")
 
 -- Default options (overridden by setup)
 local OPTS = {
