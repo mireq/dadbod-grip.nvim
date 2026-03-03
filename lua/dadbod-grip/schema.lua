@@ -247,10 +247,10 @@ local function render(state)
   table.insert(lines, "")
   local sw = math.max(SIDEBAR_MIN_WIDTH, math.min(SIDEBAR_MAX_WIDTH, math.floor(vim.o.columns * SIDEBAR_WIDTH_RATIO)))
   if sw >= 40 then
-    table.insert(lines, " CR:open  q:query  gw:grid  gC:connect  /:filter  ?:help")
+    table.insert(lines, " CR:open  q:query  gq:saved  gw:grid  gC:connect  /:filter  ?:help")
     table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripReadonly" })
   else
-    table.insert(lines, " CR:open  q:query  gw:grid")
+    table.insert(lines, " CR:open  q:query  gq:saved  gw:grid")
     table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripReadonly" })
     table.insert(lines, " gC:connect  /:filter  ?:help")
     table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripReadonly" })
@@ -433,6 +433,14 @@ local function setup_keymaps(url)
   map("q", function()
     local query_pad = require("dadbod-grip.query_pad")
     query_pad.open(url)
+  end)
+
+  -- Load saved query into query pad
+  map("gq", function()
+    local saved = require("dadbod-grip.saved")
+    saved.pick(function(sql_content)
+      require("dadbod-grip.query_pad").open(url, { initial_sql = sql_content })
+    end)
   end)
 
   -- Jump to grid window

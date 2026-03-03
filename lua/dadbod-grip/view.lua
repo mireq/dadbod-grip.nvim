@@ -339,10 +339,15 @@ local function build_render(session, opts)
   -- ── Header row ──
   local hdr_parts = { "║" }
   local qspec = session.query_spec
+  -- Computed during assembly using #padded (byte length), not widths[col] (display width).
+  -- Sort arrows (▲/▼ = 3 bytes, 1 display char) and ellipsis (… = 3 bytes) diverge from display
+  -- widths; using display widths causes cursor positions to drift by 2 bytes per UTF-8 char.
+  local hdr_byte_positions = {}
   if #columns == 0 then
     table.insert(hdr_parts, string.rep(" ", total_inner))
   else
     table.insert(hdr_parts, " ")
+    local hbp = 4  -- "║ " = 3 + 1 bytes
     for i, col in ipairs(columns) do
       local is_ro = st.readonly
       local prefix = is_ro and "~" or ""
@@ -356,10 +361,13 @@ local function build_render(session, opts)
         lw = w
       end
       local padded = label .. string.rep(" ", w - lw)
+      hdr_byte_positions[col] = { start = hbp, finish = hbp + #padded - 1 }
+      hbp = hbp + #padded
       table.insert(hdr_parts, padded)
       if i < #columns then
         local col_sep = " " .. SEP_COL .. " "
         table.insert(hdr_parts, col_sep)
+        hbp = hbp + #col_sep
       end
     end
     table.insert(hdr_parts, " ")
@@ -371,12 +379,17 @@ local function build_render(session, opts)
 
   -- ── Type annotation row (T toggle) ──
   local has_type_row = false
+  local type_row_byte_positions = nil
   if session.show_types and session._column_info then
     local type_map = {}
     for _, ci in ipairs(session._column_info) do
       type_map[ci.column_name] = ci.data_type
     end
     local type_parts = { "║ " }
+    -- Track byte positions separately: "║ " = 4 bytes (3+1), then each cell's ACTUAL byte width.
+    -- Type names truncated with "…" (3 bytes, 1 display char) diverge from hdr_byte_positions.
+    type_row_byte_positions = {}
+    local tbp = 4  -- after "║ "
     for i, col in ipairs(columns) do
       local dtype = type_map[col] or ""
       local w = widths[col]
@@ -386,10 +399,13 @@ local function build_render(session, opts)
         dw = w
       end
       local padded = dtype .. string.rep(" ", w - dw)
+      type_row_byte_positions[col] = { start = tbp, finish = tbp + #padded - 1 }
+      tbp = tbp + #padded
       table.insert(type_parts, padded)
       if i < #columns then
         local col_sep = " " .. SEP_COL .. " "
         table.insert(type_parts, col_sep)
+        tbp = tbp + #col_sep
       end
     end
     table.insert(type_parts, " ║")
@@ -411,17 +427,6 @@ local function build_render(session, opts)
   local COL_SEP_BYTES = #COL_SEP  -- 5 bytes (1+3+1)
   local row_byte_positions = {}  -- [row_order_idx] = {col_name = {start, finish}}
 
-  -- Pre-compute header/column byte positions (same layout for header, type, and data rows)
-  local hdr_byte_positions = {}
-  do
-    local bp = ROW_PREFIX_BYTES  -- after "║ " (4 bytes)
-    for i, col in ipairs(columns) do
-      local cell_w = widths[col]
-      hdr_byte_positions[col] = { start = bp, finish = bp + cell_w - 1 }
-      bp = bp + cell_w
-      if i < #columns then bp = bp + COL_SEP_BYTES end
-    end
-  end
 
   -- ── Data rows ──
   if #ordered == 0 then
@@ -537,14 +542,14 @@ local function build_render(session, opts)
     local mt = session.pending_mutation.type or "SQL"
     hints = " a:execute " .. mt .. "  U:cancel  gl:preview SQL  q:query"
   elseif st.readonly then
-    hints = " r:refresh  Tab:columns  gO:edit table  q:query  A:ai  gC:connect  ?:help"
+    hints = " r:refresh  Tab/w:col  gy:markdown  gq:saved  q:query  A:ai  gC:connect  ?:help"
   else
-    hints = " i:edit  d:delete  a:apply  r:refresh  q:query  A:ai  gC:connect  ?:help"
+    hints = " i:edit  c:clone  d:delete  a:apply  r:refresh  gq:saved  q:query  A:ai  ?:help"
   end
   table.insert(lines, hints)
 
   local data_start = has_type_row and 5 or 4
-  return { lines = lines, marks = marks, widths = widths, ordered = ordered, byte_positions = row_byte_positions, hdr_byte_positions = hdr_byte_positions, data_start = data_start, visible_columns = columns }
+  return { lines = lines, marks = marks, widths = widths, ordered = ordered, byte_positions = row_byte_positions, hdr_byte_positions = hdr_byte_positions, type_row_byte_positions = type_row_byte_positions, data_start = data_start, visible_columns = columns }
 end
 
 -- ── namespace for extmarks ───────────────────────────────────────────────
@@ -724,21 +729,44 @@ function M.get_cell(bufnr)
         }
       end
     end
-    -- Cursor is on a separator or border -- snap to nearest column
-    for i, col in ipairs(vis_cols) do
-      local bp = bp_row[col]
-      if bp and col_nr < bp.start then
-        local value = data.effective_value(st, row_idx, col)
-        return {
-          row_idx = row_idx,
-          col_name = col,
-          col_idx = i,
-          value = value,
-        }
-      end
+    -- Cursor is on a separator or border -- snap to nearest LEFT column
+    local snap = M._snap_col(vis_cols, bp_row, col_nr)
+    if snap then
+      return {
+        row_idx  = row_idx,
+        col_name = snap.col_name,
+        col_idx  = snap.col_idx,
+        value    = data.effective_value(st, row_idx, snap.col_name),
+      }
     end
   end
 
+  return nil
+end
+
+--- Pure helper: given visible columns, their byte positions, and a cursor byte offset,
+--- return { col_name, col_idx } for the column the cursor belongs to.
+--- Snaps LEFT (to the previous column) when cursor is in a separator region,
+--- matching nav_col() behavior. Used by get_cell() and testable without vim state.
+function M._snap_col(vis_cols, bp_row, col_nr)
+  local best_col, best_idx = nil, nil
+  for i, col in ipairs(vis_cols) do
+    local bp = bp_row[col]
+    if bp then
+      if col_nr < bp.start then
+        break  -- cursor is before this column; best_col is the snap target
+      end
+      best_col, best_idx = col, i
+    end
+  end
+  if best_col then
+    return { col_name = best_col, col_idx = best_idx }
+  end
+  -- Cursor is before ALL columns → snap to first
+  local first = vis_cols[1]
+  if first and bp_row[first] then
+    return { col_name = first, col_idx = 1 }
+  end
   return nil
 end
 
@@ -967,7 +995,6 @@ function M._setup_keymaps(bufnr)
     end
     if session.on_edit then session.on_edit(bufnr, cell) end
   end
-  map("e", edit_cell, "Edit cell")
   map("i", edit_cell, "Edit cell")
 
   -- d: toggle delete row
@@ -998,6 +1025,22 @@ function M._setup_keymaps(bufnr)
     local after = cell and cell.row_idx or #session.state.rows
     if session.on_insert then session.on_insert(bufnr, after) end
   end, "Insert row after cursor")
+
+  -- c: clone current row (staged INSERT with copied values, PKs cleared)
+  map("c", function()
+    local session = M._sessions[bufnr]
+    if not session then return end
+    if session.state.readonly then
+      vim.notify("Read-only: no primary key detected", vim.log.levels.INFO)
+      return
+    end
+    local cell = M.get_cell(bufnr)
+    if not cell then
+      vim.notify("Move cursor to a data row to clone", vim.log.levels.INFO)
+      return
+    end
+    if session.on_clone then session.on_clone(bufnr, cell.row_idx) end
+  end, "Clone row (copy values, clear PKs)")
 
   -- a: apply all staged changes
   map("a", function()
@@ -1204,6 +1247,33 @@ function M._setup_keymaps(bufnr)
     vim.fn.setreg("+", table.concat(lines_out, "\n"))
     vim.notify("Yanked " .. #r.ordered .. " rows as CSV", vim.log.levels.INFO)
   end, "Yank table as CSV")
+
+  -- gy: yank table as Markdown pipe table
+  map("gy", function()
+    local session_gy = M._sessions[bufnr]
+    if not session_gy or not session_gy._render then return end
+    local st_gy = session_gy.state
+    local r_gy = session_gy._render
+    local cols = st_gy.columns
+    local rows_data = {}
+    for _, row_idx in ipairs(r_gy.ordered) do
+      local row = {}
+      for _, col in ipairs(cols) do
+        table.insert(row, data.effective_value(st_gy, row_idx, col))
+      end
+      table.insert(rows_data, row)
+    end
+    local hdr = "| " .. table.concat(vim.tbl_map(function(c) return c:gsub("|", "\\|") end, cols), " | ") .. " |"
+    local sep = "| " .. table.concat(vim.tbl_map(function() return "---" end, cols), " | ") .. " |"
+    local lines_out = { hdr, sep }
+    for _, row in ipairs(rows_data) do
+      local parts = {}
+      for _, v in ipairs(row) do table.insert(parts, ((v or ""):gsub("|", "\\|"))) end
+      table.insert(lines_out, "| " .. table.concat(parts, " | ") .. " |")
+    end
+    vim.fn.setreg("+", table.concat(lines_out, "\n"))
+    vim.notify("Copied as Markdown table (" .. #rows_data .. " rows)", vim.log.levels.INFO)
+  end, "Yank table as Markdown")
 
   -- n: set cell to NULL
   map("n", function()
@@ -1482,18 +1552,8 @@ function M._setup_keymaps(bufnr)
     if not session_cr or not session_cr._render then return end
     local cell = M.get_cell(bufnr)
     if cell then
-      -- Data row: expand cell value
-      local val = cell.value or "(NULL)"
-      local expand_lines = {}
-      for line in (val .. "\n"):gmatch("([^\n]*)\n") do
-        table.insert(expand_lines, line)
-      end
-      local grip_win = vim.api.nvim_get_current_win()
-      open_info_float(grip_win, expand_lines, {
-        title = " " .. cell.col_name .. " ",
-        relative = "cursor",
-        row = 1, col = 0,
-      })
+      -- Data row: edit cell (spreadsheet-style Enter to edit)
+      edit_cell()
     else
       -- Header/type row: detect column under cursor, show full name/type
       local r = session_cr._render
@@ -1555,6 +1615,9 @@ function M._setup_keymaps(bufnr)
     local _, popup_buf = open_info_float(grip_win, lines, {
       title = " Row " .. cell.row_idx .. " ",
     })
+    -- Shadow ]p/[p: Vim's built-in "put indented" would E21 on modifiable=false popup buffers
+    vim.keymap.set("n", "]p", "<Nop>", { buffer = popup_buf, silent = true })
+    vim.keymap.set("n", "[p", "<Nop>", { buffer = popup_buf, silent = true })
     -- Highlight modified cells
     local status = data.row_status(st, cell.row_idx)
     if status == "modified" and st.changes[cell.row_idx] then
@@ -1588,7 +1651,7 @@ function M._setup_keymaps(bufnr)
 
   -- Shared helper: navigate to column by visible index offset.
   -- Works on data rows, header row, and type annotation row.
-  local function nav_col(bufnr_l, offset)
+  local function nav_col(bufnr_l, offset, use_finish)
     local session_n = M._sessions[bufnr_l]
     if not session_n or not session_n._render then
       vim.notify("nav_col: no session or render", vim.log.levels.WARN)
@@ -1602,8 +1665,25 @@ function M._setup_keymaps(bufnr)
     end
     local cursor = vim.api.nvim_win_get_cursor(0)
 
-    -- Use byte positions from first data row, or header positions as fallback (empty tables)
-    local ref_bp = (r.byte_positions and r.byte_positions[1]) or r.hdr_byte_positions
+    -- Use current row's byte positions (handles per-row multibyte differences like ·NULL·).
+    -- Fall back to hdr_byte_positions when on header/type/separator rows (di < 1).
+    local data_start = r.data_start or 4
+    local di = cursor[1] - data_start + 1
+    local ref_bp
+    if di < 1 then
+      -- Type annotation row has its own byte positions when type names are truncated with "…".
+      -- T row is at line (data_start - 2) when has_type_row (layout: title/hdr/type/sep/data).
+      local type_row_line = r.data_start and (r.data_start - 2)
+      if type_row_line and cursor[1] == type_row_line and r.type_row_byte_positions then
+        ref_bp = r.type_row_byte_positions
+      else
+        ref_bp = r.hdr_byte_positions
+      end
+    elseif r.byte_positions and r.byte_positions[di] then
+      ref_bp = r.byte_positions[di]
+    else
+      ref_bp = r.byte_positions and r.byte_positions[1] or r.hdr_byte_positions
+    end
     if not ref_bp then
       vim.notify("nav_col: no byte positions", vim.log.levels.WARN)
       return
@@ -1633,7 +1713,7 @@ function M._setup_keymaps(bufnr)
     local target_col = cols[target_idx]
     local bp = ref_bp[target_col]
     if not bp then return end
-    vim.api.nvim_win_set_cursor(0, { cursor[1], bp.start })
+    vim.api.nvim_win_set_cursor(0, { cursor[1], use_finish and bp.finish or bp.start })
   end
 
   -- Tab: next column
@@ -1784,6 +1864,30 @@ function M._setup_keymaps(bufnr)
     if not bp then return end
     vim.api.nvim_win_set_cursor(0, { cursor[1], bp.start })
   end, "Last column")
+
+  -- e: end of current cell (last byte of cell's allocated space; shows truncation point)
+  map("e", function() nav_col(bufnr, 1, true) end, "Next column (land at end of cell)")
+
+  -- gq: load saved query (open query pad + picker)
+  map("gq", function()
+    local session_q = M._sessions[bufnr]
+    local s_url = session_q and session_q.url
+    local query_pad = require("dadbod-grip.query_pad")
+    local saved = require("dadbod-grip.saved")
+    query_pad.open(s_url, {})
+    vim.schedule(function()
+      saved.pick(function(sql_content)
+        -- Find the query pad buffer and load SQL into it
+        for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+          if vim.api.nvim_buf_get_name(buf):match("grip://query") then
+            vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(sql_content, "\n"))
+            vim.bo[buf].modified = false
+            break
+          end
+        end
+      end)
+    end)
+  end, "Load saved query")
 
   -- {: previous modified/staged row
   map("{", function()
@@ -2049,7 +2153,7 @@ function M._setup_keymaps(bufnr)
     local session_f = M._sessions[bufnr]
     if not session_f or not session_f.query_spec then return end
     if not confirm_discard_changes("Filter") then return end
-    vim.ui.input({ prompt = "WHERE: " }, function(input)
+    vim.ui.input({ prompt = "WHERE clause (e.g. status='x' AND amount>0): " }, function(input)
       if not input or input == "" then return end
       local new_spec = qmod.add_filter(session_f.query_spec, input)
       if session_f.on_requery then session_f.on_requery(bufnr, new_spec) end
@@ -2175,6 +2279,34 @@ function M._setup_keymaps(bufnr)
     if session_p.on_requery then session_p.on_requery(bufnr, new_spec) end
   end, "First page")
 
+  -- H/L: ergonomic page navigation (prev/next) — single-key aliases for [p/]p
+  map("H", function()
+    local session_p = M._sessions[bufnr]
+    if not session_p or not session_p.query_spec then return end
+    if session_p.query_spec.page <= 1 then
+      vim.notify("Already on first page", vim.log.levels.INFO)
+      return
+    end
+    if not confirm_discard_changes("Page change") then return end
+    local new_spec = qmod.prev_page(session_p.query_spec)
+    if session_p.on_requery then session_p.on_requery(bufnr, new_spec) end
+  end, "Previous page")
+
+  map("L", function()
+    local session_p = M._sessions[bufnr]
+    if not session_p or not session_p.query_spec then return end
+    if session_p.total_rows then
+      local total_pages = math.max(1, math.ceil(session_p.total_rows / session_p.query_spec.page_size))
+      if session_p.query_spec.page >= total_pages then
+        vim.notify("Already on last page", vim.log.levels.INFO)
+        return
+      end
+    end
+    if not confirm_discard_changes("Page change") then return end
+    local new_spec = qmod.next_page(session_p.query_spec)
+    if session_p.on_requery then session_p.on_requery(bufnr, new_spec) end
+  end, "Next page")
+
   -- X: reset all query modifiers (sorts, filters, page)
   map("X", function()
     local session_x = M._sessions[bufnr]
@@ -2254,6 +2386,16 @@ function M._setup_keymaps(bufnr)
       table.remove(session_fk.nav_stack) -- pop on failure
       vim.notify("FK query failed: " .. err, vim.log.levels.WARN)
       return
+    end
+
+    -- Empty result: fetch columns from schema (same guard as do_refresh in init.lua)
+    if #result.columns == 0 then
+      local col_info = db.get_column_info(fk_info.ref_table, session_fk.state.url)
+      if col_info then
+        for _, ci in ipairs(col_info) do
+          table.insert(result.columns, ci.column_name)
+        end
+      end
     end
 
     -- Fetch PKs for referenced table
@@ -2741,12 +2883,12 @@ function M.show_help(opts)
   local ro = opts.readonly
   local help = {
       "",
-      "          ██████╗ ██████╗ ██╗██████╗ ",
-      "         ██╔════╝ ██╔══██╗██║██╔══██╗",
-      "         ██║  ███╗██████╔╝██║██████╔╝",
-      "         ██║   ██║██╔══██╗██║██╔═══╝ ",
-      "         ╚██████╔╝██║  ██║██║██║     ",
-      "          ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝    ",
+      "    d   ███████╗███████╗██╗███████╗",
+      "    a  ██╔═════╝██╔══██║██║██╔══██║",
+      "    d  ██║  ███╗██████╔╝██║███████║",
+      "    b  ██║   ██║██╔══██╗██║██╔════╝",
+      "    o  ╚██████╔╝██║  ██║██║██║",
+      "    d   ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝",
       "",
       " ───────────────────────────────────────────",
       "",
@@ -2762,23 +2904,30 @@ function M.show_help(opts)
       "  g-        Restore all hidden columns",
       "  gH        Column visibility picker",
       "  $         Last column",
+      "  e         Next column, land at end of cell",
       "  {/}       Prev / next modified row",
-      "  <CR>      Expand cell value in popup",
+      "  <CR> / i  Edit cell under cursor",
       "  K         Row view (vertical transpose)",
       "  y         Yank cell value to clipboard",
       "  Y         Yank row as CSV",
       "  gY        Yank entire table as CSV",
+      "  gy        Yank table as Markdown pipe table",
       "",
       "  Sort / Filter / Pagination",
       "  s         Toggle sort on column (ASC→DESC→off)",
-      "  S         Stack secondary sort on column",
+      "  S         Stack sort on column (stackable — press S on multiple cols for ▲1 ▼2 ▲3)",
       "  f         Quick filter by cell value",
       "  <C-f>     Freeform WHERE clause filter",
+      "            ↳ e.g.: status = 'active'",
+      "            ↳ e.g.: created_at > '2024-01-01' AND amount > 100",
+      "            ↳ e.g.: name ILIKE '%alice%'",
+      "            ↳ F clears all filters",
       "  F         Clear all filters",
       "  gp        Load saved filter preset",
       "  gP        Save current filter as preset",
       "  X         Reset view (clear sort/filter/page)",
-      "  ]p / [p   Next / previous page",
+      "  L / H     Next / previous page",
+      "  ]p / [p   Next / previous page (bracket alias)",
       "  ]P / [P   Last / first page",
       "",
       "  FK Navigation",
@@ -2796,11 +2945,16 @@ function M.show_help(opts)
       "  Schema & Workflow",
       "  go        Toggle schema browser",
       "  gT        Pick table (fuzzy finder)",
-      "  gO     Open as editable table (read-only → table)",
+      "  gO        Open as editable table (read-only → table)",
       "  gC/<C-g>  Switch database connection",
       "  q         Open query pad",
+      "  gq        Load saved query",
       "  gh        Query history browser",
       "  A         AI SQL generation",
+      "  gA        AI SQL generation (from query pad)",
+      "            ↳ context: schema DDL for ≤30 tables (cols, types, PKs, FKs)",
+      "            ↳ + existing query pad SQL if present (AI will modify it)",
+      "            ↳ provider: ANTHROPIC_API_KEY → OPENAI → GEMINI → Ollama",
       "",
       "  Actions",
       "  r         Refresh (re-run query)",
@@ -2828,11 +2982,12 @@ function M.show_help(opts)
       vim.list_extend(help, {
         "",
         "  Editing",
-        "  i/e       Edit cell under cursor",
+        "  <CR> / i  Edit cell under cursor",
         "  n         Set cell to NULL",
         "  p         Paste clipboard into cell",
         "  P         Paste multi-line into rows",
         "  o         Insert new row after cursor",
+        "  c         Clone row (copy values, clear PKs)",
         "  d         Toggle delete on current row",
         "  u         Undo last edit (multi-level)",
         "  <C-r>     Redo",

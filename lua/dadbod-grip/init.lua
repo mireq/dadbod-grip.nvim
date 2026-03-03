@@ -590,6 +590,27 @@ function M.open(arg, url, opts)
         end
       end
     end,
+    on_clone = function(bid, row_idx)
+      local session_c = view._sessions[bid]
+      if not session_c then return end
+      local new_state = data.clone_row(session_c.state, row_idx)
+      view.apply_edit(bid, new_state)
+      vim.notify("Cloned row (edit PKs then gw to commit)", vim.log.levels.INFO)
+      -- Move cursor to first cell of the cloned row
+      local r = session_c._render
+      if r then
+        for i, idx in ipairs(r.ordered) do
+          if new_state.inserted[idx] and idx == new_state._next_insert_idx - 1 then
+            local line_nr = i + (r.data_start or 4) - 1
+            local bp_row = r.byte_positions and r.byte_positions[i]
+            local first_col = new_state.columns[1]
+            local col_byte = bp_row and bp_row[first_col] and bp_row[first_col].start or #("║ ")
+            pcall(vim.api.nvim_win_set_cursor, 0, { line_nr, col_byte })
+            break
+          end
+        end
+      end
+    end,
   })
 end
 

@@ -23,7 +23,7 @@ local function ensure_buf(url)
 
   -- Pre-fill with hint comment
   vim.api.nvim_buf_set_lines(_pad_bufnr, 0, -1, false, {
-    "-- C-CR:run  gA:ai  gT:tables  gh:history  gw:grid  go:sidebar  gC:connect",
+    "-- C-CR:run  C-s:save  gA:ai  gT:tables  gh:hist  gq:saved  gw:grid  go:schema  gC:connect",
     "",
   })
   -- Mark buffer as not modified after creation
@@ -150,6 +150,15 @@ local function setup_keymaps(bufnr, url)
       vim.bo[bufnr].modified = false
     end)
   end, { buffer = bufnr, silent = true, desc = "Grip: query history" })
+
+  -- gq: load saved query into buffer
+  vim.keymap.set("n", "gq", function()
+    local saved = require("dadbod-grip.saved")
+    saved.pick(function(sql_content)
+      vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, vim.split(sql_content, "\n"))
+      vim.bo[bufnr].modified = false
+    end)
+  end, { buffer = bufnr, silent = true, desc = "Grip: load saved query" })
 
   -- ?: help popup (same full grid help — useful for keymap reference while writing SQL)
   vim.keymap.set("n", "?", function()

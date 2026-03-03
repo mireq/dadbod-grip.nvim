@@ -41,7 +41,7 @@ function M.save(name, content)
   end
   local path = queries_dir() .. "/" .. fname .. ".sql"
   vim.fn.writefile(vim.split(content, "\n"), path)
-  vim.notify("Grip: saved query → " .. fname .. ".sql", vim.log.levels.INFO)
+  vim.notify("Grip: saved query → " .. fname .. ".sql  (gq to browse)", vim.log.levels.INFO)
 end
 
 --- Prompt for name and save buffer content.
@@ -137,6 +137,15 @@ local function telescope_pick(queries, callback)
           callback(content, entry.value.name)
         end
       end)
+      -- <C-d>: delete selected query
+      vim.keymap.set("i", "<C-d>", function()
+        local entry = action_state.get_selected_entry()
+        if not entry then return end
+        actions.close(prompt_bufnr)
+        vim.ui.input({ prompt = "Delete '" .. entry.value.name .. "'? (yes/no): " }, function(ans)
+          if ans == "yes" then M.delete(entry.value.name) end
+        end)
+      end, { buffer = prompt_bufnr })
       return true
     end,
   }):find()
@@ -165,6 +174,16 @@ local function fzf_pick(queries, callback)
           end
         end
       end,
+      ["ctrl-d"] = function(selected)
+        if selected and selected[1] then
+          local q = by_name[selected[1]]
+          if q then
+            vim.ui.input({ prompt = "Delete '" .. q.name .. "'? (yes/no): " }, function(ans)
+              if ans == "yes" then M.delete(q.name) end
+            end)
+          end
+        end
+      end,
     },
   })
 end
@@ -172,15 +191,25 @@ end
 --- Native vim.ui.select fallback.
 local function native_pick(queries, callback)
   local labels = {}
+  local entries = {}
   for _, q in ipairs(queries) do
     table.insert(labels, q.name)
+    table.insert(entries, { query = q, delete = false })
+  end
+  for _, q in ipairs(queries) do
+    table.insert(labels, "[DELETE] " .. q.name)
+    table.insert(entries, { query = q, delete = true })
   end
 
-  vim.ui.select(labels, { prompt = "Load Query:" }, function(_, idx)
+  vim.ui.select(labels, { prompt = "Load Query (or [DELETE] to remove):" }, function(_, idx)
     if not idx then return end
-    local q = queries[idx]
-    local content = table.concat(vim.fn.readfile(q.path), "\n")
-    callback(content, q.name)
+    local entry = entries[idx]
+    if entry.delete then
+      M.delete(entry.query.name)
+    else
+      local content = table.concat(vim.fn.readfile(entry.query.path), "\n")
+      callback(content, entry.query.name)
+    end
   end)
 end
 

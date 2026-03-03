@@ -288,6 +288,57 @@ test("get_ordered_rows: inserts are spliced after their _after idx", function()
   assert(ordered[2] >= 1000, "insert idx should be >= 1000")
 end)
 
+-- ── clone_row() ─────────────────────────────────────────────────────────────
+
+test("clone_row: non-PK values are copied", function()
+  local st = make_state({})
+  local st2 = data.clone_row(st, 1)
+  local ordered = data.get_ordered_rows(st2)
+  -- Find the new insert idx (it's not 1 or 2)
+  local ins_idx
+  for _, idx in ipairs(ordered) do
+    if idx ~= 1 and idx ~= 2 then ins_idx = idx; break end
+  end
+  assert(ins_idx, "should have an inserted row")
+  eq(data.effective_value(st2, ins_idx, "name"), "alice")
+  eq(data.effective_value(st2, ins_idx, "email"), "alice@test.com")
+end)
+
+test("clone_row: PK values are nil in cloned row", function()
+  local st = make_state({})
+  local st2 = data.clone_row(st, 1)
+  local ordered = data.get_ordered_rows(st2)
+  local ins_idx
+  for _, idx in ipairs(ordered) do
+    if idx ~= 1 and idx ~= 2 then ins_idx = idx; break end
+  end
+  assert(ins_idx, "should have an inserted row")
+  eq(data.effective_value(st2, ins_idx, "id"), nil, "PK should be nil so DB generates new ID")
+end)
+
+test("clone_row: NULL source values are not stored", function()
+  local st = make_state({ rows = { { "1", "", "alice@test.com" } } })
+  local st2 = data.clone_row(st, 1)
+  local ordered = data.get_ordered_rows(st2)
+  local ins_idx
+  for _, idx in ipairs(ordered) do
+    if idx ~= 1 then ins_idx = idx; break end
+  end
+  assert(ins_idx, "should have an inserted row")
+  -- empty string in original = nil (NULL), should not be stored
+  eq(data.effective_value(st2, ins_idx, "name"), nil, "NULL source value should stay nil in clone")
+end)
+
+test("clone_row: inserts after source row_idx", function()
+  local st = make_state({})
+  local st2 = data.clone_row(st, 1)
+  local ordered = data.get_ordered_rows(st2)
+  -- Row at position 2 should be the clone (spliced after row_idx=1)
+  eq(ordered[1], 1, "first row is original row 1")
+  assert(ordered[2] ~= 2, "clone should come before original row 2")
+  eq(ordered[3], 2, "original row 2 should be last")
+end)
+
 -- ── summary ─────────────────────────────────────────────────────────────────
 print(string.format("\ndata_spec: %d passed, %d failed", pass, fail))
 if fail > 0 then os.exit(1) end

@@ -111,6 +111,27 @@ function M.insert_row(state, after_idx)
   return s
 end
 
+-- M.clone_row(state, row_idx) → State
+-- Copies all non-PK effective values into a new staged INSERT after row_idx.
+function M.clone_row(state, row_idx)
+  local s = edit_copy(state)
+  local new_idx = s._next_insert_idx
+  s._next_insert_idx = s._next_insert_idx + 1
+  local pk_set = {}
+  for _, pk in ipairs(s.pks) do pk_set[pk] = true end
+  local values = {}
+  for _, col in ipairs(s.columns) do
+    if not pk_set[col] then
+      local v = M.effective_value(state, row_idx, col)
+      -- Skip nil and "" — both represent NULL in original rows (psql --csv quirk)
+      if v ~= nil and v ~= "" then values[col] = v end
+    end
+    -- PK columns: omit so DB SERIAL/AUTO_INCREMENT generates a new ID on commit
+  end
+  s.inserted[new_idx] = { _after = row_idx, values = values }
+  return s
+end
+
 -- M.undo_row(state, row_idx) → State
 -- Removes all staged changes/deletions for a row. For inserts, removes the row.
 function M.undo_row(state, row_idx)
