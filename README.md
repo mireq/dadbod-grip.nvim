@@ -125,7 +125,7 @@ Full table metadata: columns, types, PKs, FKs, indexes, row estimates, and size.
 - **Transaction safety** wraps all DML in BEGIN/COMMIT with ROLLBACK on error.
 - **Batch editing** in visual mode to set, delete, or NULL multiple rows at once.
 - **Two-tier undo + redo**: local staging undo (50-deep) with `<C-r>` redo, plus transaction undo that reverses committed changes (10-deep, with confirmation).
-- **Mutation preview**: `UPDATE` and `DELETE` from the query pad show affected rows before executing. SET values appear blue (modified), DELETE rows appear red. Press `a` to execute, `u` to cancel.
+- **Mutation preview**: `UPDATE`, `DELETE`, and `INSERT` from the query pad show affected rows before executing. SET values appear blue (modified), DELETE rows appear red, INSERT rows appear green. Press `a` to execute, `u` to cancel.
 
 ### Query and Navigation
 - **Sort, filter, and pagination** using `s`/`S` to sort, `f`/`<C-f>`/`F` to filter, `gp`/`gP` for saved filter presets, and `]p`/`[p` to page.
@@ -138,8 +138,8 @@ Full table metadata: columns, types, PKs, FKs, indexes, row estimates, and size.
 - **AI SQL generation** via `A` or `:GripAsk` turning natural language into SQL queries using Anthropic, OpenAI, Gemini, or local Ollama. AI reads existing query pad SQL to modify it rather than generating from scratch. Schema context cached per connection.
 
 ### Schema and Workflow
-- **Schema browser** via `:GripSchema` or `go` showing a sidebar tree with columns, types, and PK/FK markers.
-- **Table picker** via `:GripTables` or `gT` providing a fuzzy finder with column preview.
+- **Schema browser** via `:GripSchema` or `gb` showing a sidebar tree with columns, types, and PK/FK markers. `gb` focuses the browser (opens it if closed). From inside the browser, `gb` closes it.
+- **Table picker** via `:GripTables` or `go` / `gT` providing a fuzzy finder with column preview.
 - **SQL query pad** via `:GripQuery` or `q` opening a scratch buffer that pipes results into editable grids.
 - **Saved queries** via `:GripSave` and `:GripLoad` persisting to project-local `.grip/queries/` files.
 - **Connection profiles** via `:GripConnect` or `gC` storing connections in `.grip/connections.json` with `g:dbs` backward compatibility. Connections auto-persist globally (`~/.grip/connections.json`) so they're available from any project. Connecting opens the full workspace (schema sidebar + query pad) automatically.
@@ -271,8 +271,8 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 
 | Key | Action |
 |-----|--------|
-| `go` | Toggle schema browser sidebar |
-| `gT` | Pick table (fuzzy finder) |
+| `go` / `gT` / `gt` | Pick table (fuzzy finder) |
+| `gb` | Schema browser (focus if open; close from inside) |
 | `gC` / `<C-g>` | Switch database connection |
 | `gO` | Open read-only query result as editable table |
 | `gN` | Rename column under cursor |
@@ -297,11 +297,12 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 |-----|--------|
 | `<C-CR>` | Execute buffer (normal/insert) or selection (visual) into grip grid |
 | `<C-s>` | Save query with `:GripSave` |
+| `gq` | Load saved query (picker with SQL preview) |
 | `gA` | AI SQL generation (natural language) |
-| `gT` | Table picker |
-| `gh` | Query history |
+| `go` / `gT` / `gt` | Table picker |
+| `gh` | Query history (with SQL preview) |
 | `gw` | Jump to grid window |
-| `go` | Toggle schema sidebar |
+| `gb` | Schema browser (focus if open; close from inside) |
 | `gC` / `<C-g>` | Switch database connection |
 
 ### Commands

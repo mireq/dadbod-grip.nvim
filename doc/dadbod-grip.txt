@@ -134,13 +134,16 @@ All commands are global and available after the plugin loads.
 
                                                                *:GripSchema*
 :GripSchema
-  Toggle the schema browser sidebar. Shows tables and views with expandable
-  columns, type abbreviations, and PK/FK markers.
+  Open or focus the schema browser sidebar. Shows tables and views with
+  expandable columns, type abbreviations, and PK/FK markers. The `gb`
+  keymap focuses the sidebar from any buffer, or closes it when already
+  inside.
 
                                                                *:GripTables*
 :GripTables
   Open the table picker. Shows a floating list with column preview (PK,
   FK markers, and types). Uses grip_picker with zero external dependencies.
+  Also reachable via `go`, `gT`, or `gt` from any grip buffer.
 
                                                                 *:GripQuery*
 :GripQuery [sql]
@@ -318,9 +321,10 @@ YANKING ~
 
 SCHEMA AND WORKFLOW ~
                                                           *grip-workflow*
-  go              Toggle schema browser sidebar
-  gT              Open table picker (fuzzy finder)
-  gQ              Open query pad (pre-filled with current query)
+  go / gT / gt    Open table picker (fuzzy finder)
+  gb              Schema browser (focus if open; close from inside)
+  gC / <C-g>      Switch database connection
+  q               Open query pad (pre-filled with current query)
   gh              Query history browser
 
 ADVANCED ~
@@ -399,22 +403,32 @@ MySQL, DuckDB) or PRAGMA foreign_key_list (SQLite).
 ==============================================================================
 10. SCHEMA BROWSER                                          *grip-schema*
 
-Toggle with `:GripSchema` or `go` from a grid buffer. Opens a left sidebar
+Toggle with `:GripSchema` or `gb` from a grid buffer. Opens a left sidebar
 showing all tables and views for the current connection.
 
 Schema browser keymaps:
   <CR>            Open table in grid (or open parent table from column)
+  <S-CR>          Open table in new split
   l / zo          Expand table to show columns
   h / zc          Collapse table
   L               Expand all tables
   H               Collapse all tables
   /               Filter tables by name
+  n / N           Jump to next / previous table match
+  F               Clear filter
   r               Refresh schema (re-fetch table list)
-  gT              Open table picker
-  gQ              Open query pad
+  y               Yank table or column name to clipboard
+  go / gT / gt    Open table picker
+  q               Open query pad
+  gq              Load saved query (picker with SQL preview)
+  gw              Jump to grid window
+  gC / gc         Switch database connection
+  gh              Query history browser
+  gb              Close sidebar (from inside; gb elsewhere: focus/open)
   D               Drop table (with typed confirmation)
   +               Create new table (interactive designer)
-  q / <Esc>       Close sidebar
+  <Esc>           Close sidebar
+  ?               Toggle help popup
 
 Columns show type abbreviations (int, text, bool, vc(255), etc.) and
 markers for primary keys and foreign keys.
@@ -422,13 +436,20 @@ markers for primary keys and foreign keys.
 ==============================================================================
 11. QUERY PAD                                             *grip-query-pad*
 
-Open with `:GripQuery` or `gQ` from a grid buffer. Creates a scratch SQL
+Open with `:GripQuery` or `q` from a grid buffer. Creates a scratch SQL
 buffer with filetype=sql (enables vim-dadbod-completion if installed).
 
 Query pad keymaps:
   <C-CR>          Execute buffer contents into a grip grid (normal/insert)
   <C-CR>          Execute visual selection into a grip grid (visual mode)
   <C-s>           Save query with :GripSave
+  gq              Load saved query (picker with SQL preview)
+  gA              AI SQL generation (natural language)
+  go / gT / gt    Table picker
+  gh              Query history browser (with SQL preview)
+  gw              Jump to grid window
+  gb              Schema browser (focus if open; close from inside)
+  gC / <C-g>      Switch database connection
 
 The query pad sets b:db to the current connection URL, which enables
 vim-dadbod-completion for table and column name auto-completion.
