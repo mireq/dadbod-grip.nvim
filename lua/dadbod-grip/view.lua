@@ -955,11 +955,20 @@ end
 -- ── focused info float helper ────────────────────────────────────────────
 -- Opens a focused float with q/Esc to close. Caller stays in grip buffer.
 local function open_info_float(grip_win, lines, float_opts)
+  -- nvim_buf_set_lines requires each element to contain no \n.
+  -- Flatten any multi-line strings (e.g. cell values with embedded newlines).
+  local flat = {}
+  for _, l in ipairs(lines) do
+    for _, sub in ipairs(vim.split(tostring(l), "\n", { plain = true })) do
+      table.insert(flat, sub)
+    end
+  end
+
   local max_w = 0
-  for _, l in ipairs(lines) do max_w = math.max(max_w, vim.fn.strdisplaywidth(l)) end
+  for _, l in ipairs(flat) do max_w = math.max(max_w, vim.fn.strdisplaywidth(l)) end
 
   local width = float_opts.width or math.min(math.max(max_w + 2, 30), 80)
-  local height = float_opts.height or math.min(#lines, 30)
+  local height = float_opts.height or math.min(#flat, 30)
   local relative = float_opts.relative or "editor"
 
   local row, col
@@ -972,7 +981,7 @@ local function open_info_float(grip_win, lines, float_opts)
   end
 
   local popup_buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_lines(popup_buf, 0, -1, false, lines)
+  vim.api.nvim_buf_set_lines(popup_buf, 0, -1, false, flat)
   if float_opts.filetype then
     vim.api.nvim_set_option_value("filetype", float_opts.filetype, { buf = popup_buf })
   end

@@ -16,25 +16,31 @@ M.NULL_VALUE = "__GRIP_NULL__"
 function M.open(prompt, initial_value, on_save)
   local caller_win = vim.api.nvim_get_current_win()  -- save for restore on close
   local pre_fill = initial_value or ""
-  local width = math.min(60, math.max(30, #pre_fill + 6))
+  -- Split on newlines so nvim_buf_set_lines receives clean per-line strings
+  local fill_lines = vim.split(pre_fill, "\n", { plain = true })
+  local height = math.min(10, math.max(1, #fill_lines))
+  -- Width from longest line
+  local max_line_len = 0
+  for _, l in ipairs(fill_lines) do max_line_len = math.max(max_line_len, #l) end
+  local width = math.min(80, math.max(30, max_line_len + 6))
 
   -- Create a scratch buffer for the editor
   local edit_buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_set_option_value("buftype", "nofile", { buf = edit_buf })
   vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = edit_buf })
-  vim.api.nvim_buf_set_lines(edit_buf, 0, -1, false, { pre_fill })
+  vim.api.nvim_buf_set_lines(edit_buf, 0, -1, false, fill_lines)
 
   -- Position: above cursor row
   local cursor = vim.api.nvim_win_get_cursor(0)
   local win_row = cursor[1]
-  local float_row = win_row > 3 and -2 or 1
+  local float_row = win_row > 3 and -(height + 1) or 1
 
   local float_win = vim.api.nvim_open_win(edit_buf, true, {
     relative = "cursor",
     row = float_row,
     col = 0,
     width = width,
-    height = 1,
+    height = height,
     style = "minimal",
     border = "rounded",
     title = " " .. (prompt or "edit") .. " ",
@@ -61,7 +67,8 @@ function M.open(prompt, initial_value, on_save)
     if closed then return end
     closed = true
     local lines = vim.api.nvim_buf_get_lines(edit_buf, 0, -1, false)
-    local val = lines[1] or ""
+    -- Join all lines to support multi-line editing (for cells with embedded newlines)
+    local val = table.concat(lines, "\n")
     vim.cmd("stopinsert")
     if vim.api.nvim_win_is_valid(float_win) then
       vim.api.nvim_win_close(float_win, true)
