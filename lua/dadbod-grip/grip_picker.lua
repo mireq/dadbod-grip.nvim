@@ -47,6 +47,7 @@ function M.open(opts)
   local on_select = opts.on_select
   local on_delete = opts.on_delete
   local preview_fn = opts.preview   -- fn(item) -> string[] | nil
+  local actions   = opts.actions or {}  -- list of {key, label, fn(item)}
   local title     = opts.title or "Grip Picker"
 
   -- Mutable state
@@ -205,6 +206,18 @@ function M.open(opts)
     table.insert(lines, "")
     local footer_parts = { "Enter:select" }
     if on_delete then table.insert(footer_parts, "D:delete") end
+    -- Contextual actions: show label only when applicable for current item
+    local flist_for_footer = filtered_items()
+    local cur_item = flist_for_footer[cursor]
+    for _, action in ipairs(actions) do
+      local show = true
+      if action.when and cur_item then
+        show = action.when(cur_item)
+      end
+      if show then
+        table.insert(footer_parts, action.label)
+      end
+    end
     table.insert(footer_parts, "/:filter")
     table.insert(footer_parts, "q:close")
     table.insert(lines, "  " .. table.concat(footer_parts, "  "))
@@ -323,6 +336,25 @@ function M.open(opts)
       end
 
       on_delete(item, refresh_fn)
+    end)
+  end
+
+  -- Custom actions (e.g. M:mask, W:watch, !:write)
+  -- action.close_on_select = true: close picker then call fn (like on_select)
+  -- action.close_on_select = false/nil: call fn then re-render (stateful toggle)
+  for _, action in ipairs(actions) do
+    map(action.key, function()
+      local flist = filtered_items()
+      if #flist == 0 then return end
+      local item = flist[cursor]
+      if not item then return end
+      if action.close_on_select then
+        close()
+        if action.fn then vim.schedule(function() action.fn(item) end) end
+      else
+        if action.fn then action.fn(item) end
+        render()
+      end
     end)
   end
 

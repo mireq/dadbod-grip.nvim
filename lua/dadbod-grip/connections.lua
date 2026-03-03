@@ -56,6 +56,15 @@ local function is_file_url(url)
   return false
 end
 
+--- Mask the password in a DB URL for display. Returns URL unchanged if no password found.
+local function mask_url(url)
+  if not url or url == "" then return url end
+  -- Match ://user:password@host — replace password with ***
+  return (url:gsub("(://[^:@/]+:)([^@]+)(@)", function(pre, _, at)
+    return pre .. "***" .. at
+  end))
+end
+
 --- Read connections from a JSON file.
 local function read_json_connections(path, source)
   if vim.fn.filereadable(path) == 0 then return {} end
@@ -207,7 +216,8 @@ end
 --- Switch active connection. Routes file connections through grip.open(),
 --- DB connections through vim.g.db + workspace open.
 --- Auto-saves to .grip/connections.json if not already persisted.
-function M.switch(url, name, conn_type)
+--- opts: { write = bool, watch_ms = number } — session-only, never persisted.
+function M.switch(url, name, conn_type, opts)
   -- Resolve type: param > stored connections > auto-detect
   local file_conns = read_file_connections()
   local resolved_type = conn_type
@@ -237,7 +247,10 @@ function M.switch(url, name, conn_type)
     -- Capture current window so the grid replaces it (e.g. dashboard)
     local cur_win = vim.api.nvim_get_current_win()
     vim.schedule(function()
-      require("dadbod-grip").open(url, nil, { reuse_win = cur_win })
+      local open_opts = { reuse_win = cur_win }
+      if opts and opts.write    then open_opts.write    = true       end
+      if opts and opts.watch_ms then open_opts.watch_ms = opts.watch_ms end
+      require("dadbod-grip").open(url, nil, open_opts)
       -- Open sidebar with file schema after the grid is placed
       vim.schedule(function()
         local schema = require("dadbod-grip.schema")
@@ -331,6 +344,9 @@ function M.pick()
   end
   table.insert(picker_items, new_sentinel)
 
+  -- Track which connection URLs have password reveal active
+  local show_pass = {}
+
   require("dadbod-grip.grip_picker").open({
     title = "Connections",
     items = picker_items,
@@ -339,7 +355,8 @@ function M.pick()
       local is_file = c.type == "file" or (not c.type and is_file_url(c.url))
       local tag = is_file and "[file] " or "[db]   "
       local pad = string.rep(" ", max_name - vim.fn.strdisplaywidth(c.name))
-      return tag .. c.name .. pad .. "  " .. c.url
+      local url = show_pass[c.url] and c.url or mask_url(c.url)
+      return tag .. c.name .. pad .. "  " .. url
     end,
     on_select = function(c)
       if c._new then
@@ -364,6 +381,43 @@ function M.pick()
         refresh_fn(new_items)
       end
     end,
+    actions = {
+      {
+        key            = "!",
+        label          = "!:write",
+        close_on_select = true,
+        when           = function(c)
+          return not c._new and (c.type == "file" or (not c.type and is_file_url(c.url)))
+        end,
+        fn             = function(c)
+          if c._new then return end
+          M.switch(c.url, c.name, c.type, { write = true })
+        end,
+      },
+      {
+        key            = "W",
+        label          = "W:watch",
+        close_on_select = true,
+        when           = function(c) return not c._new end,
+        fn             = function(c)
+          if c._new then return end
+          M.switch(c.url, c.name, c.type, { watch_ms = 5000 })
+        end,
+      },
+      {
+        key   = "M",
+        label = "M:mask",
+        when  = function(c) return not c._new end,
+        fn    = function(c)
+          if c._new then return end
+          if show_pass[c.url] then
+            show_pass[c.url] = nil
+          else
+            show_pass[c.url] = true
+          end
+        end,
+      },
+    },
   })
 end
 

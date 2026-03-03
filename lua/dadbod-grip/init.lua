@@ -107,10 +107,131 @@ local function resolve_query(arg, page_size)
   return query.new_table(arg, page_size), arg
 end
 
+-- ── file write-back ───────────────────────────────────────────────────────
+-- Applies staged changes to a local file by creating a temp table, mutating it,
+-- then COPY TO-ing back to the original path. file_path must be a local path.
+local function do_apply_file_writeback(bufnr, session)
+  local st = session.state
+  local file_path = session.file_path
+
+  local updates = data.get_updates(st)
+  local inserts = data.get_inserts(st)
+  local deletes = data.get_deletes(st)
+  local total = #updates + #inserts + #deletes
+
+  if total == 0 then
+    vim.notify("No changes to apply", vim.log.levels.INFO)
+    return
+  end
+
+  -- Destructive-action confirm
+  local short = vim.fn.fnamemodify(file_path, ":t")
+  local CANCEL = "\0"
+  local ok, ans = pcall(vim.fn.input, {
+    prompt = "Overwrite " .. short .. " (" .. total .. " change(s))? (y/N): ",
+    cancelreturn = CANCEL,
+  })
+  if not ok or ans == CANCEL or (ans ~= "y" and ans ~= "yes") then
+    vim.notify("Write-back cancelled", vim.log.levels.INFO)
+    return
+  end
+
+  -- Detect output format from file extension
+  local ext = file_path:lower():match("%.([^.]+)$") or ""
+  local fmt_map = {
+    parquet = "PARQUET", csv = "CSV", tsv = "CSV",
+    json = "JSON", ndjson = "JSON", jsonl = "JSON",
+    arrow = "ARROW", ipc = "ARROW",
+  }
+  local fmt = fmt_map[ext] or "CSV"
+
+  local safe_path = file_path:gsub("'", "''")
+  local stmts = {}
+
+  -- 1. Create temp table with synthetic row-number PK
+  table.insert(stmts,
+    string.format("CREATE TEMP TABLE _grip_w AS SELECT ROW_NUMBER() OVER () AS _grip_rowid, * FROM '%s'", safe_path)
+  )
+
+  -- 2. Apply deletes (by row index)
+  for _, del in ipairs(deletes) do
+    table.insert(stmts, string.format("DELETE FROM _grip_w WHERE _grip_rowid = %d", del.row_idx))
+  end
+
+  -- 3. Apply updates (by row index)
+  for _, upd in ipairs(updates) do
+    local set_parts = {}
+    for col, val in pairs(upd.changes) do
+      local qval = (val == nil or val == data.NULL_SENTINEL) and "NULL"
+                   or sql.quote_value(tostring(val))
+      table.insert(set_parts, sql.quote_ident(col) .. " = " .. qval)
+    end
+    if #set_parts > 0 then
+      table.insert(stmts, string.format(
+        "UPDATE _grip_w SET %s WHERE _grip_rowid = %d",
+        table.concat(set_parts, ", "), upd.row_idx
+      ))
+    end
+  end
+
+  -- 4. Apply inserts (no rowid needed — appended at end)
+  for _, ins in ipairs(inserts) do
+    table.insert(stmts, sql.build_insert("_grip_w", ins.values, ins.columns))
+  end
+
+  -- 5. Copy back to original file
+  local copy_extra = fmt == "CSV" and ", HEADER TRUE" or ""
+  table.insert(stmts, string.format(
+    "COPY (SELECT * EXCLUDE (_grip_rowid) FROM _grip_w ORDER BY _grip_rowid) TO '%s' (FORMAT %s, OVERWRITE_OR_IGNORE TRUE%s)",
+    safe_path, fmt, copy_extra
+  ))
+
+  -- 6. Drop temp table
+  table.insert(stmts, "DROP TABLE _grip_w")
+
+  local full_sql = table.concat(stmts, ";\n") .. ";"
+  local t0 = vim.uv.hrtime()
+  local _, err = db.execute(full_sql, "duckdb::memory:")
+  local ms = math.floor((vim.uv.hrtime() - t0) / 1e6)
+
+  if err then
+    editor.show_error("Write-back failed", {
+      "✗ File not overwritten", "",
+      "  " .. (err:match("[^\n]+") or err), "",
+      "  Your staged changes are preserved.",
+    })
+    return
+  end
+
+  local parts = {}
+  if #updates > 0 then table.insert(parts, #updates .. " update(s)") end
+  if #deletes > 0 then table.insert(parts, #deletes .. " delete(s)") end
+  if #inserts > 0 then table.insert(parts, #inserts .. " insert(s)") end
+  vim.notify(
+    "Written " .. table.concat(parts, ", ") .. " to " .. short .. " (" .. ms .. "ms)",
+    vim.log.levels.INFO
+  )
+
+  local history = require("dadbod-grip.history")
+  history.record({ sql = full_sql, url = "duckdb::memory:", table_name = file_path, type = "writeback", elapsed_ms = ms })
+
+  session.elapsed_ms = ms
+  session.last_action = "writeback"
+  session.on_refresh(bufnr)
+end
+
 -- ── apply staged changes ──────────────────────────────────────────────────
 local function do_apply(bufnr, url)
   local session = view._sessions[bufnr]
   if not session then return end
+
+  -- File write-back path: session is a local file opened in write mode
+  if session.write_mode and session.file_path
+      and not session.file_path:match("^https?://") then
+    do_apply_file_writeback(bufnr, session)
+    return
+  end
+
   local st = session.state
 
   local updates = data.get_updates(st)
@@ -931,7 +1052,19 @@ function M.setup(opts)
   -- Register :Grip command
   vim.api.nvim_create_user_command("Grip", function(cmd_opts)
     local arg = vim.trim(cmd_opts.args or "")
-    M.open(arg, nil)
+    -- Parse --write and --watch[=Ns] flags, stripping them from the query arg
+    local grip_opts = {}
+    arg = arg:gsub("%s*%-%-write%s*", function() grip_opts.write = true; return " " end)
+    arg = arg:gsub("%s*%-%-watch=(%d+)s?%s*", function(n)
+      grip_opts.watch_ms = tonumber(n) * 1000
+      return " "
+    end)
+    arg = arg:gsub("%s*%-%-watch%s*", function()
+      if not grip_opts.watch_ms then grip_opts.watch_ms = 5000 end
+      return " "
+    end)
+    arg = vim.trim(arg)
+    M.open(arg, nil, next(grip_opts) and grip_opts or nil)
   end, {
     nargs = "?",
     desc  = "Open dadbod-grip result grid for table or query",

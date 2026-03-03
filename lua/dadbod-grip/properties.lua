@@ -141,12 +141,16 @@ local function build_lines(props)
 
     local nullable = col.is_nullable == "YES" and "YES" or "NO"
     local default_val = col.column_default ~= "" and col.column_default or ""
-    -- Truncate long defaults
+    -- Truncate long values so they don't break column alignment
+    local col_name = col.column_name
+    if #col_name > col_widths.name then col_name = col_name:sub(1, col_widths.name - 1) .. "~" end
+    local dtype = col.data_type
+    if #dtype > col_widths.dtype then dtype = dtype:sub(1, col_widths.dtype - 1) .. "~" end
     if #default_val > col_widths.default then
       default_val = default_val:sub(1, col_widths.default - 1) .. "~"
     end
 
-    add(col_row(tostring(i), col.column_name, col.data_type, nullable, default_val .. marker))
+    add(col_row(tostring(i), col_name, dtype, nullable, default_val .. marker))
     col_line_map[#lines] = col.column_name
   end
 

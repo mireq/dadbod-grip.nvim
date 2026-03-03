@@ -311,6 +311,7 @@ COLUMN VISIBILITY ~
   -               Hide column under cursor
   g-              Restore all hidden columns
   gH              Column visibility picker (toggle individual columns)
+  =               Expand column to full content width; press again to reset
 
 YANKING ~
                                                            *grip-yanking*
@@ -324,6 +325,8 @@ SCHEMA AND WORKFLOW ~
   gb              Schema browser (focus if open; close from inside)
   gC / <C-g>      Switch database connection
   gO              Open read-only query result as editable table
+  gW              Toggle watch mode (auto-refresh every 5s; skips when staged)
+  g!              Toggle write mode (apply overwrites local file; remote = off)
   gN              Rename column under cursor
   gw              Jump to grid window
   q               Open query pad (pre-filled with current query)

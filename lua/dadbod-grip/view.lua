@@ -83,13 +83,15 @@ local function ensure_highlights()
   vim.cmd("hi! GripBoolFalse gui=bold ctermfg=203 guifg=#f38ba8")
   vim.cmd("hi! GripDatePast  gui=italic ctermfg=243 guifg=#6c7086")
   vim.cmd("hi! GripUrl       gui=underline ctermfg=117 guifg=#89b4fa")
+  vim.cmd("hi! GripWatch     gui=bold ctermfg=117 guifg=#89b4fa")
 end
 
 -- ── column width calculation ──────────────────────────────────────────────
 local function calc_col_widths(columns, rows, max_width)
   local widths = {}
   for _, col in ipairs(columns) do
-    widths[col] = math.min(vim.fn.strdisplaywidth(col), max_width)
+    -- +2 reserves space for the sort indicator (e.g. " ▲") so the col name is never truncated
+    widths[col] = math.min(vim.fn.strdisplaywidth(col) + 2, max_width)
   end
   -- For large tables, sample first 100 + last 10 rows instead of scanning all
   local n = #rows
@@ -329,6 +331,13 @@ local function build_render(session, opts)
 
   -- Auto-fit: compute natural widths first (clamped to configured max)
   local widths = calc_col_widths(columns, display_rows, configured_max)
+
+  -- Apply per-column width overrides (set by = keymap)
+  if session.col_width_overrides then
+    for col, override_w in pairs(session.col_width_overrides) do
+      if widths[col] ~= nil then widths[col] = override_w end
+    end
+  end
 
   -- Smart auto-fit: if total fits, expand narrow columns proportionally
   local available = vim.o.columns - 4  -- borders + padding
@@ -867,6 +876,74 @@ function M._snap_col(vis_cols, bp_row, col_nr)
   return nil
 end
 
+-- ── badge helpers ────────────────────────────────────────────────────────
+
+--- Update the winbar badge for watch/write mode indicators.
+local function _update_badge(bufnr)
+  local session = M._sessions[bufnr]
+  if not session then return end
+  -- Find the window showing this buffer
+  local winid
+  for _, wid in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_get_buf(wid) == bufnr then winid = wid; break end
+  end
+  if not winid or not vim.api.nvim_win_is_valid(winid) then return end
+
+  local parts = {}
+  if session.watch_ms then
+    local secs = session.watch_ms / 1000
+    local label = secs == math.floor(secs) and tostring(math.floor(secs)) .. "s" or tostring(secs) .. "s"
+    table.insert(parts, "%#GripWatch#↺ " .. label .. "%#Normal#")
+  end
+  if session.write_mode then
+    table.insert(parts, "%#ErrorMsg#✎ WRITE%#Normal#")
+  end
+  local bar = #parts > 0 and ("  " .. table.concat(parts, "  ")) or ""
+  pcall(function() vim.wo[winid].winbar = bar end)
+end
+
+--- Start a watch timer for bufnr at interval ms. Stops any existing timer.
+local function _start_watch(bufnr, ms)
+  local session = M._sessions[bufnr]
+  if not session then return end
+  -- Stop existing timer if any
+  if session.watch_timer then
+    pcall(function() session.watch_timer:stop(); session.watch_timer:close() end)
+    session.watch_timer = nil
+  end
+  session.watch_ms = ms
+  local timer = vim.uv.new_timer()
+  session.watch_timer = timer
+  timer:start(ms, ms, vim.schedule_wrap(function()
+    local s = M._sessions[bufnr]
+    if not s or not vim.api.nvim_buf_is_valid(bufnr) then
+      pcall(function() timer:stop(); timer:close() end)
+      return
+    end
+    -- Skip refresh when there are staged mutations pending
+    local staged = s.state and (
+      next(s.state.changes or {}) or
+      next(s.state.deleted or {}) or
+      next(s.state.inserted or {})
+    )
+    if staged then return end
+    if s.on_refresh then s.on_refresh(bufnr) end
+  end))
+  _update_badge(bufnr)
+end
+
+--- Stop the watch timer for bufnr.
+local function _stop_watch(bufnr)
+  local session = M._sessions[bufnr]
+  if not session then return end
+  if session.watch_timer then
+    pcall(function() session.watch_timer:stop(); session.watch_timer:close() end)
+    session.watch_timer = nil
+  end
+  session.watch_ms = nil
+  _update_badge(bufnr)
+end
+
 -- ── open ──────────────────────────────────────────────────────────────────
 -- Creates split, renders initial state, wires keymaps.
 -- Returns bufnr.
@@ -896,6 +973,7 @@ function M.open(state, url, query_sql, opts)
     opts = opts or {},
     hidden_columns = {},
     elapsed_ms = opts and opts.elapsed_ms or nil,
+    write_mode = (opts and opts.write == true) and true or false,
   }
 
   -- Open in existing window (reuse_win) or a new horizontal split below
@@ -985,16 +1063,30 @@ function M.open(state, url, query_sql, opts)
   -- Wire keymaps
   M._setup_keymaps(bufnr)
 
-  -- Cleanup session on buffer wipe
+  -- Cleanup session on buffer wipe (also stops watch timer)
   vim.api.nvim_create_autocmd("BufWipeout", {
     buffer = bufnr,
     once = true,
     callback = function()
       local s = M._sessions[bufnr]
-      if s then M._close_live_sql_float(s) end
+      if s then
+        M._close_live_sql_float(s)
+        if s.watch_timer then
+          pcall(function() s.watch_timer:stop(); s.watch_timer:close() end)
+          s.watch_timer = nil
+        end
+      end
       M._sessions[bufnr] = nil
     end,
   })
+
+  -- Start watch timer if requested via opts; show badge for write/watch
+  if (opts and opts.watch_ms) or (opts and opts.write) then
+    vim.schedule(function()
+      if opts.watch_ms then _start_watch(bufnr, opts.watch_ms) end
+      _update_badge(bufnr)
+    end)
+  end
 
   return bufnr
 end
@@ -1923,9 +2015,19 @@ function M._setup_keymaps(bufnr)
       session._column_info = info
     end
     local info = session._column_info
+    -- Pre-compute column widths for aligned display
+    local max_name_w, max_type_w = 0, 0
+    for _, col in ipairs(info) do
+      max_name_w = math.max(max_name_w, vim.fn.strdisplaywidth(col.column_name))
+      max_type_w = math.max(max_type_w, vim.fn.strdisplaywidth(col.data_type))
+    end
+    max_name_w = math.min(max_name_w, 30)
+    max_type_w = math.min(max_type_w, 32)
     local lines = { " " .. st.table_name, " " .. string.rep("─", 40) }
     for _, col in ipairs(info) do
-      local parts = { "  " .. col.column_name .. "  " .. col.data_type }
+      local name_pad = string.rep(" ", math.max(0, max_name_w - vim.fn.strdisplaywidth(col.column_name)))
+      local type_pad = string.rep(" ", math.max(0, max_type_w - vim.fn.strdisplaywidth(col.data_type)))
+      local parts = { "  " .. col.column_name .. name_pad .. "  " .. col.data_type .. type_pad }
       if col.is_nullable == "NO" then table.insert(parts, "NOT NULL") end
       if col.column_default ~= "" then table.insert(parts, "DEFAULT " .. col.column_default) end
       if col.constraints ~= "" then table.insert(parts, "[" .. col.constraints .. "]") end
@@ -2332,6 +2434,37 @@ function M._setup_keymaps(bufnr)
     vim.notify("Restored " .. count .. " hidden column(s)", vim.log.levels.INFO)
     M.render(bufnr, session.state)
   end, "Restore all hidden columns")
+
+  -- =: toggle column width between expanded (full content) and default
+  map("=", function()
+    local session = M._sessions[bufnr]
+    if not session then return end
+    local cell = M.get_cell(bufnr)
+    if not cell then
+      vim.notify("Move cursor to a column to resize", vim.log.levels.INFO)
+      return
+    end
+    local col = cell.col_name
+    if not session.col_width_overrides then session.col_width_overrides = {} end
+    if session.col_width_overrides[col] then
+      -- Reset to default width
+      session.col_width_overrides[col] = nil
+      vim.notify("Column width reset: " .. col, vim.log.levels.INFO)
+    else
+      -- Expand: scan all rows for maximum display width of this column
+      local st = session.state
+      local max_w = vim.fn.strdisplaywidth(col) + 2  -- header + sort indicator space
+      local ordered = data.get_ordered_rows(st)
+      for _, row_idx in ipairs(ordered) do
+        local v = data.effective_value(st, row_idx, col)
+        local display = (v == nil or v == "") and NULL_DISPLAY or tostring(v)
+        max_w = math.max(max_w, vim.fn.strdisplaywidth(display))
+      end
+      session.col_width_overrides[col] = max_w
+      vim.notify("Column expanded: " .. col, vim.log.levels.INFO)
+    end
+    M.render(bufnr, session.state)
+  end, "Expand/reset column width")
 
   -- gH: multi-select column visibility picker
   map("gH", function()
@@ -3400,6 +3533,66 @@ function M._setup_keymaps(bufnr)
   map("gC", _pick_connection, "Switch connection")
   map("<C-g>", _pick_connection, "Switch connection")
 
+  -- gW: toggle watch mode (auto-refresh on timer)
+  map("gW", function()
+    local session = M._sessions[bufnr]
+    if not session then return end
+    if session.watch_ms then
+      _stop_watch(bufnr)
+      vim.notify("Watch mode off", vim.log.levels.INFO)
+    else
+      local ms = (session.opts and session.opts.watch_ms) or 5000
+      _start_watch(bufnr, ms)
+      local secs = ms / 1000
+      local label = secs == math.floor(secs) and tostring(math.floor(secs)) .. "s" or tostring(secs) .. "s"
+      vim.notify("Watch mode on (" .. label .. ")", vim.log.levels.INFO)
+    end
+  end, "Toggle watch mode (auto-refresh)")
+
+  -- g!: toggle write mode (file write-back on apply)
+  map("g!", function()
+    local session = M._sessions[bufnr]
+    if not session then return end
+
+    local file_path = session.file_path
+    if not file_path then
+      vim.notify("Write mode only applies to local file connections", vim.log.levels.INFO)
+      return
+    end
+    if file_path:match("^https?://") then
+      vim.notify("Remote files are read-only", vim.log.levels.INFO)
+      return
+    end
+
+    if session.write_mode then
+      -- Turning OFF — warn if staged changes exist
+      local staged = session.state and (
+        next(session.state.changes or {}) or
+        next(session.state.deleted or {}) or
+        next(session.state.inserted or {})
+      )
+      if staged then
+        vim.notify("Staged changes exist. Apply (a) or undo (u) before disabling write mode.", vim.log.levels.WARN)
+        return
+      end
+      session.write_mode = false
+      _update_badge(bufnr)
+      vim.notify("Write mode off", vim.log.levels.INFO)
+    else
+      -- Turning ON — destructive-action confirm
+      local short = vim.fn.fnamemodify(file_path, ":t")
+      local CANCEL = "\0"
+      local ok, ans = pcall(vim.fn.input, {
+        prompt = "Enable write mode for " .. short .. "? Applying edits will overwrite the file. (y/N): ",
+        cancelreturn = CANCEL,
+      })
+      if not ok or ans == CANCEL or (ans ~= "y" and ans ~= "yes") then return end
+      session.write_mode = true
+      _update_badge(bufnr)
+      vim.notify("Write mode on — edits will overwrite " .. short, vim.log.levels.INFO)
+    end
+  end, "Toggle write mode (overwrite file on apply)")
+
   -- gO: swap read-only query result to editable table
   map("gO", function()
     local session = M._sessions[bufnr]
@@ -3550,6 +3743,7 @@ function M.show_help(opts)
       "  -         Hide column under cursor",
       "  g-        Restore all hidden columns",
       "  gH        Column visibility picker",
+      "  =         Expand/reset column width",
       "  $         Last column",
       "  e         Next column, land at end of cell",
       "  {/}       Prev / next modified row",
@@ -3605,6 +3799,8 @@ function M.show_help(opts)
       "  gT        Pick table (floating picker)",
       "  gO        Open as editable table (read-only → table)",
       "  gC/<C-g>  Switch database connection",
+      "  gW        Toggle watch mode (auto-refresh on timer)",
+      "  g!        Toggle write mode (apply overwrites file)",
       "  q         Open query pad",
       "  gq        Load saved query",
       "  gh        Query history browser",

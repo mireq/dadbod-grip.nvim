@@ -24,7 +24,7 @@ Edit data like a GUI. Navigate like Vim. Never leave your editor.
 </td>
 </tr></table>
 
-**Edit database tables like Vim buffers.** Rows are color-coded as you stage changes: blue for modified, red for deleted, green for inserted. A live SQL float generates the exact DML as you work. Preview the full mutation before it touches the DB, then apply in a single transaction. Reverse committed transactions. Navigate foreign keys through a breadcrumb trail. Browse schema in a sidebar with PK/FK markers and instant table open. Issue DDL through the UI: create tables, rename columns, drop with CASCADE. Profile column distributions with sparklines. Explain query plans in plain English. Generate SQL from natural language via Anthropic, OpenAI, Gemini, or Ollama. Open Parquet, CSV, and remote URLs as live DuckDB tables. Connects to PostgreSQL, SQLite, MySQL, and DuckDB. Every Vim motion works. Nothing installs outside Neovim.
+**Edit database tables like Vim buffers.** Rows are color-coded as you stage changes: blue for modified, red for deleted, green for inserted. A live SQL float generates the exact DML as you work. Preview the full mutation before it touches the DB, then apply in a single transaction. Reverse committed transactions. Navigate foreign keys through a breadcrumb trail. Browse schema in a sidebar with PK/FK markers and instant table open. Issue DDL through the UI: create tables, rename columns, drop with CASCADE. Profile column distributions with sparklines. Explain query plans in plain English. Generate SQL from natural language via Anthropic, OpenAI, Gemini, or Ollama. Open Parquet, CSV, and remote URLs as live DuckDB tables — with `--write` to edit files in-place and `--watch` to auto-refresh on a timer. Connects to PostgreSQL, SQLite, MySQL, and DuckDB. Every Vim motion works. Nothing installs outside Neovim.
 
 | **Editing** | **Analysis** | **Schema & AI** |
 |---|---|---|
@@ -35,6 +35,7 @@ Edit data like a GUI. Navigate like Vim. Never leave your editor.
 | **Schema browser** `gb` sidebar, PK/FK markers | **Data diff** `gD` compare tables by primary key | **Multi-DB** PostgreSQL · SQLite · MySQL · DuckDB |
 | **Saved queries** project-local `.grip/queries/` | **Export** CSV · TSV · JSON · SQL · Markdown · Table | **Connection profiles** global auto-persist |
 | **Tab views** `1`-`9` History · Stats · Explain · Columns · FK | **Column Stats** `4` null% · distinct · min · max | **Query History** `3` filtered per table |
+| **Write mode** `:Grip file --write` · edit files and write back to disk | **Watch mode** `:Grip file --watch` · auto-refresh grid on a timer | **Picker `W` / `!`** open any connection in watch or write mode |
 
 ## Quickstart
 
@@ -49,7 +50,10 @@ Then `:GripConnect` to pick your database. That's it. Schema sidebar + query pad
 
 ![Schema sidebar, 4 staged mutations, saved queries picker with SQL preview, and Live SQL float](grap.png)
 
-**Left:** Schema browser with PK/FK markers and column types. **Grid:** 4 staged mutations: modified row highlighted blue, deleted row struck through red. **Float:** Saved queries picker with instant SQL preview. **Right:** Live SQL float showing the exact DELETE and UPDATE statements generated as you edit. The SQL is written for you. Nothing hits the database until you press `a`.
+**Left:** Schema browser with PK/FK markers and column types. 
+**Grid:** 4 staged mutations: modified row highlighted blue, deleted row struck through red. 
+**Float:** Saved queries picker with instant SQL preview. 
+**Right:** Live SQL float showing the exact DELETE and UPDATE statements generated as you edit. The SQL is written for you. Nothing hits the database until you press `a`.
 
 ## Features
 
@@ -99,6 +103,27 @@ Then `:GripConnect` to pick your database. That's it. Schema sidebar + query pad
 - **File-as-table** support where `:Grip /path/to/data.parquet` opens Parquet/CSV/JSON/XLSX files via DuckDB.
 - **Remote file querying** where `:Grip https://example.com/data.csv` opens remote files via DuckDB httpfs.
 
+### File Modes: Watch and Write
+
+Files opened via `:Grip` support two modes that turn static files into live, editable datasets.
+
+**Write mode** — `:Grip /path/to/data.parquet --write`
+
+Stage inline cell edits as normal, then press `a` to apply. Instead of running DML against a database, grip uses DuckDB's `COPY TO` to write the modified data back to disk in the original format. Parquet, CSV, TSV, JSON, NDJSON, and Arrow are all supported. A destructive-action confirmation fires before the file is overwritten. Remote `https://` URLs are always read-only regardless of the flag.
+
+**Watch mode** — `:Grip /path/to/data.csv --watch` or `:Grip file.csv --watch=10s`
+
+The grid re-runs the query on a timer and updates rows automatically. Default interval is 5 seconds; use `--watch=Ns` to set a custom one. Watch pauses while you have staged changes so you never lose in-progress edits to a background refresh.
+
+Both modes are available from the connection picker and live on any open grid:
+
+| | Connection picker | Open grid |
+|---|---|---|
+| Write mode | `!` on a `[file]` connection | `g!` to toggle |
+| Watch mode | `W` on any connection | `gW` to toggle |
+
+Active modes show as a colored badge in the grid's winbar: red `✎ WRITE` and blue `↺ 5s`. Modes are never persisted — always opt-in per session.
+
 ### Additional
 - **Composite primary key support** for multi-column WHERE clauses.
 - **Read-only mode** is auto-detected when no primary key exists.
@@ -126,6 +151,7 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `-` | Hide column under cursor |
 | `g-` | Restore all hidden columns |
 | `gH` | Column visibility picker |
+| `=` | Expand/reset column width under cursor |
 | `{`/`}` | Previous / next modified row |
 | `<CR>` | Expand cell value in popup |
 | `K` | Row view (vertical transpose) |
@@ -228,6 +254,8 @@ Keys `2`–`9` also work in the schema sidebar to open any table directly in the
 | `gb` | Schema browser (focus if open; close from inside) |
 | `gC` / `<C-g>` | Switch database connection |
 | `gO` | Open read-only query result as editable table |
+| `gW` | Toggle watch mode (auto-refresh on timer, default 5s) |
+| `g!` | Toggle write mode (apply edits overwrites local file) |
 | `gN` | Rename column under cursor |
 | `q` | Open query pad (pre-filled with current query) |
 | `gw` | Jump to grid (from query pad or sidebar) |
@@ -291,7 +319,7 @@ Keys `2`–`9` also work in the schema sidebar to open any table directly in the
 
 | Command | Description |
 |---------|-------------|
-| `:Grip [table\|SQL\|file]` | Open table, run query, or open file as table |
+| `:Grip [table\|SQL\|file\|url]` | Open table, run query, or open file as table. Flags: `--write` (edit file in-place, writes back on apply), `--watch` (auto-refresh every 5s), `--watch=Ns` (custom interval in seconds) |
 | `:GripSchema` | Toggle schema browser sidebar |
 | `:GripTables` | Open table picker with column preview |
 | `:GripQuery [sql]` | Open SQL query pad |
@@ -403,9 +431,13 @@ Everything else (`:GripSchema`, `:GripQuery`, `:GripTables`) still works individ
 ```
 :Grip users                           → open table in editable grid
 :Grip SELECT * FROM orders LIMIT 50   → run arbitrary SQL
-:Grip /path/to/data.parquet           → open file via DuckDB
+:Grip /path/to/data.parquet           → open Parquet file via DuckDB
+:Grip /path/to/data.csv --write       → edit file in-place (writes back on apply)
+:Grip /path/to/data.csv --watch       → auto-refresh grid every 5s
+:Grip /path/to/data.csv --watch=10s   → auto-refresh with custom interval
 :Grip https://example.com/data.csv   → open remote file via httpfs
-:GripExplain                          → EXPLAIN current query
+:GripConnect                          → pick a connection, open full workspace
+:GripExplain                          → EXPLAIN current query in plain English
 ```
 
 ### DBUI Integration (optional)
