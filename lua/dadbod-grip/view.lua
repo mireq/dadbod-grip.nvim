@@ -41,40 +41,25 @@ local TOP_MID = "╤"
 
 -- ── highlight group setup ──────────────────────────────────────────────────
 local function ensure_highlights()
-  local groups = {
-    GripHeader   = "bold",
-    GripNull     = "italic",
-    GripModified = "bold",
-    GripDeleted  = "strikethrough",
-    GripInserted = "bold",
-    GripReadonly = "italic",
-    GripBorder   = "bold",
-    GripStatusOk = "bold",
-    GripStatusChg = "bold",
-    GripNegative  = "bold",
-    GripBoolTrue  = "bold",
-    GripBoolFalse = "bold",
-    GripDatePast  = "italic",
-    GripUrl       = "underline",
-  }
-  for name, _ in pairs(groups) do
-    if vim.fn.hlID(name) == 0 then
-      if name == "GripHeader"   then vim.cmd("hi GripHeader gui=bold cterm=bold") end
-      if name == "GripNull"     then vim.cmd("hi GripNull gui=italic ctermfg=243 guifg=#6c7086") end
-      -- Staged groups use hi! (always override) so guibg applies even on re-source
-      if name == "GripModified" then vim.cmd("hi! GripModified gui=bold ctermfg=111 guifg=#89b4fa ctermbg=236 guibg=#1a1e2e") end
-      if name == "GripDeleted"  then vim.cmd("hi! GripDeleted gui=strikethrough ctermfg=203 guifg=#f38ba8 ctermbg=236 guibg=#2d1418") end
-      if name == "GripInserted" then vim.cmd("hi! GripInserted gui=bold ctermfg=113 guifg=#a6e3a1 ctermbg=236 guibg=#162d18") end
-      if name == "GripReadonly" then vim.cmd("hi GripReadonly gui=italic ctermfg=243 guifg=#6c7086") end
-      if name == "GripBorder"   then vim.cmd("hi GripBorder gui=bold ctermfg=147 guifg=#cba6f7") end
-      if name == "GripStatusChg" then vim.cmd("hi GripStatusChg gui=bold ctermfg=229 guifg=#f9e2af") end
-      if name == "GripNegative"  then vim.cmd("hi GripNegative gui=bold ctermfg=203 guifg=#f38ba8") end
-      if name == "GripBoolTrue"  then vim.cmd("hi GripBoolTrue gui=bold ctermfg=113 guifg=#a6e3a1") end
-      if name == "GripBoolFalse" then vim.cmd("hi GripBoolFalse gui=bold ctermfg=203 guifg=#f38ba8") end
-      if name == "GripDatePast"  then vim.cmd("hi GripDatePast gui=italic ctermfg=243 guifg=#6c7086") end
-      if name == "GripUrl"       then vim.cmd("hi GripUrl gui=underline ctermfg=117 guifg=#89b4fa") end
-    end
-  end
+  -- All grip-owned groups use hi! (unconditional) so colors apply reliably
+  -- on re-source, colorscheme changes, and first load.
+  -- Staged groups have guibg; conditional groups are fg-only.
+  vim.cmd("hi! GripHeader    gui=bold cterm=bold")
+  vim.cmd("hi! GripNull      gui=italic ctermfg=243 guifg=#6c7086")
+  vim.cmd("hi! GripModified  gui=bold ctermfg=111 guifg=#89b4fa ctermbg=236 guibg=#1a1e2e")
+  vim.cmd("hi! GripDeleted   gui=strikethrough ctermfg=203 guifg=#f38ba8 ctermbg=236 guibg=#2d1418")
+  vim.cmd("hi! GripInserted  gui=bold ctermfg=113 guifg=#a6e3a1 ctermbg=236 guibg=#162d18")
+  -- Staged NULL: red fg on same dark-blue bg as GripModified — signals "value cleared"
+  vim.cmd("hi! GripNullStaged gui=bold ctermfg=203 guifg=#f38ba8 ctermbg=236 guibg=#1a1e2e")
+  vim.cmd("hi! GripReadonly  gui=italic ctermfg=243 guifg=#6c7086")
+  vim.cmd("hi! GripBorder    gui=bold ctermfg=147 guifg=#cba6f7")
+  vim.cmd("hi! GripStatusOk  gui=bold ctermfg=229 guifg=#f9e2af")
+  vim.cmd("hi! GripStatusChg gui=bold ctermfg=229 guifg=#f9e2af")
+  vim.cmd("hi! GripNegative  gui=bold ctermfg=203 guifg=#f38ba8")
+  vim.cmd("hi! GripBoolTrue  gui=bold ctermfg=113 guifg=#a6e3a1")
+  vim.cmd("hi! GripBoolFalse gui=bold ctermfg=203 guifg=#f38ba8")
+  vim.cmd("hi! GripDatePast  gui=italic ctermfg=243 guifg=#6c7086")
+  vim.cmd("hi! GripUrl       gui=underline ctermfg=117 guifg=#89b4fa")
 end
 
 -- ── column width calculation ──────────────────────────────────────────────
@@ -502,7 +487,12 @@ local function build_render(session, opts)
           elseif status == "inserted" then
             cell_hl = "GripInserted"
           elseif status == "modified" and st.changes[row_idx] and st.changes[row_idx][col] ~= nil then
-            cell_hl = "GripModified"
+            -- NULL_SENTINEL = staged to be cleared → red fg (value absent) on blue bg (modified)
+            if st.changes[row_idx][col] == data.NULL_SENTINEL then
+              cell_hl = "GripNullStaged"
+            else
+              cell_hl = "GripModified"
+            end
           elseif eff == nil or eff == "" then
             cell_hl = "GripNull"
           else
@@ -723,8 +713,8 @@ function M._update_live_sql_float(session)
 
     local win = vim.api.nvim_open_win(buf, false, {
       relative = "editor",
-      row = math.floor((vim.o.lines - float_h) / 2),
-      col = math.floor((editor_cols - float_w) / 2),
+      row = math.max(0, vim.o.lines - float_h - 4),
+      col = math.max(0, editor_cols - float_w - 2),
       width = float_w,
       height = float_h,
       style = "minimal",
@@ -2119,6 +2109,12 @@ function M._setup_keymaps(bufnr)
   map("gl", function()
     local session = M._sessions[bufnr]
     if not session then return end
+
+    -- Mutation preview mode: use gs instead
+    if session.pending_mutation then
+      vim.notify("gs: view mutation SQL  |  a: execute  |  U: cancel", vim.log.levels.INFO)
+      return
+    end
 
     if not session.state.table_name then
       vim.notify("Live SQL requires a table name", vim.log.levels.INFO)
