@@ -249,20 +249,25 @@ function M.current()
   return { name = nil, url = url }
 end
 
---- Open a picker to select and switch connection.
+--- Prompt user to enter a new connection URL + name, then switch to it.
+local function prompt_new_connection()
+  vim.ui.input({ prompt = "Connection URL: " }, function(url)
+    if url and url ~= "" then
+      vim.ui.input({ prompt = "Connection name: " }, function(name)
+        if name and name ~= "" then
+          M.add(name, url)
+        end
+        M.switch(url, name)
+      end)
+    end
+  end)
+end
+
+--- Open a picker to select and switch connection. Uses grip_picker (zero external deps).
 function M.pick()
   local conns = M.list()
   if #conns == 0 then
-    vim.ui.input({ prompt = "Connection URL: " }, function(url)
-      if url and url ~= "" then
-        vim.ui.input({ prompt = "Connection name: " }, function(name)
-          if name and name ~= "" then
-            M.add(name, url)
-          end
-          M.switch(url, name)
-        end)
-      end
-    end)
+    prompt_new_connection()
     return
   end
 
@@ -270,32 +275,47 @@ function M.pick()
   for _, c in ipairs(conns) do
     max_name = math.max(max_name, vim.fn.strdisplaywidth(c.name))
   end
-  local labels = {}
-  for _, c in ipairs(conns) do
-    local pad = string.rep(" ", max_name - vim.fn.strdisplaywidth(c.name))
-    table.insert(labels, c.name .. pad .. "  " .. c.url)
-  end
-  table.insert(labels, "+ New connection...")
 
-  vim.ui.select(labels, { prompt = "Grip Connect:" }, function(_, idx)
-    if not idx then return end
-    if idx == #labels then
-      -- New connection
-      vim.ui.input({ prompt = "Connection URL: " }, function(url)
-        if url and url ~= "" then
-          vim.ui.input({ prompt = "Connection name: " }, function(name)
-            if name and name ~= "" then
-              M.add(name, url)
-            end
-            M.switch(url, name)
-          end)
+  -- Sentinel item for "new connection"
+  local new_sentinel = { name = "+ New connection...", url = "", _new = true }
+  local picker_items = {}
+  for _, c in ipairs(conns) do
+    table.insert(picker_items, c)
+  end
+  table.insert(picker_items, new_sentinel)
+
+  require("dadbod-grip.grip_picker").open({
+    title = "Connections",
+    items = picker_items,
+    display = function(c)
+      if c._new then return c.name end
+      local pad = string.rep(" ", max_name - vim.fn.strdisplaywidth(c.name))
+      return c.name .. pad .. "  " .. c.url
+    end,
+    on_select = function(c)
+      if c._new then
+        prompt_new_connection()
+      else
+        M.switch(c.url, c.name)
+      end
+    end,
+    on_delete = function(c, refresh_fn)
+      if c._new then return end
+      vim.ui.input({ prompt = "Remove '" .. c.name .. "'? (y/N): " }, function(ans)
+        if ans == "y" or ans == "yes" then
+          M.remove(c.name)
+          -- Rebuild list with updated sentinel at end
+          local new_conns = M.list()
+          local new_items = {}
+          for _, nc in ipairs(new_conns) do
+            table.insert(new_items, nc)
+          end
+          table.insert(new_items, new_sentinel)
+          refresh_fn(new_items)
         end
       end)
-    else
-      local c = conns[idx]
-      M.switch(c.url, c.name)
-    end
-  end)
+    end,
+  })
 end
 
 return M

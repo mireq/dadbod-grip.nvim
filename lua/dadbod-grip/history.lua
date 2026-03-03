@@ -1,5 +1,5 @@
 -- history.lua -- query history with JSONL storage.
--- Stores in .grip/history.jsonl. Picker uses telescope -> fzf-lua -> vim.ui.select.
+-- Stores in .grip/history.jsonl. Picker uses grip_picker (zero external deps).
 
 local M = {}
 
@@ -124,99 +124,6 @@ function M.clear()
   M._write_all({})
 end
 
--- ── pickers ─────────────────────────────────────────────────────────────
-
-local function telescope_pick(entries, callback)
-  local pickers = require("telescope.pickers")
-  local finders = require("telescope.finders")
-  local conf = require("telescope.config").values
-  local actions = require("telescope.actions")
-  local action_state = require("telescope.actions.state")
-  local previewers = require("telescope.previewers")
-
-  pickers.new({}, {
-    prompt_title = "Grip Query History",
-    finder = finders.new_table({
-      results = entries,
-      entry_maker = function(entry)
-        local time_str = os.date("%Y-%m-%d %H:%M", entry.ts)
-        local ms_str = entry.elapsed_ms and (entry.elapsed_ms .. "ms  ") or ""
-        local short_sql = entry.sql:sub(1, 60):gsub("\n", " ")
-        return {
-          value = entry,
-          display = time_str .. "  " .. ms_str .. short_sql,
-          ordinal = entry.sql .. " " .. (entry["table"] or ""),
-        }
-      end,
-    }),
-    sorter = conf.generic_sorter({}),
-    previewer = previewers.new_buffer_previewer({
-      title = "SQL",
-      define_preview = function(self, entry_obj)
-        local e = entry_obj.value
-        local lines = {
-          "-- " .. os.date("%Y-%m-%d %H:%M:%S", e.ts),
-          "-- " .. (e.url or ""),
-          "",
-        }
-        for _, l in ipairs(vim.split(e.sql, "\n")) do
-          table.insert(lines, l)
-        end
-        vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, lines)
-        vim.bo[self.state.bufnr].filetype = "sql"
-      end,
-    }),
-    attach_mappings = function(prompt_bufnr)
-      actions.select_default:replace(function()
-        local entry_obj = action_state.get_selected_entry()
-        actions.close(prompt_bufnr)
-        if entry_obj then callback(entry_obj.value.sql, entry_obj.value) end
-      end)
-      return true
-    end,
-  }):find()
-end
-
-local function fzf_pick(entries, callback)
-  local fzf = require("fzf-lua")
-  local labels = {}
-  local by_idx = {}
-  for i, e in ipairs(entries) do
-    local time_str = os.date("%Y-%m-%d %H:%M", e.ts)
-    local ms_str = e.elapsed_ms and (e.elapsed_ms .. "ms  ") or ""
-    local label = time_str .. "  " .. ms_str .. e.sql:sub(1, 60):gsub("\n", " ")
-    table.insert(labels, label)
-    by_idx[label] = e
-  end
-
-  fzf.fzf_exec(labels, {
-    prompt = "Grip History> ",
-    previewer = false,
-    actions = {
-      ["default"] = function(selected)
-        if selected and selected[1] then
-          local e = by_idx[selected[1]]
-          if e then callback(e.sql, e) end
-        end
-      end,
-    },
-  })
-end
-
-local function native_pick(entries, callback)
-  local labels = {}
-  for _, e in ipairs(entries) do
-    local time_str = os.date("%Y-%m-%d %H:%M", e.ts)
-    local ms_str = e.elapsed_ms and (e.elapsed_ms .. "ms  ") or ""
-    table.insert(labels, time_str .. "  " .. ms_str .. e.sql:sub(1, 50):gsub("\n", " "))
-  end
-
-  vim.ui.select(labels, { prompt = "Query History:" }, function(_, idx)
-    if not idx then return end
-    callback(entries[idx].sql, entries[idx])
-  end)
-end
-
 --- Open a picker to select a history entry. Calls callback(sql, entry).
 function M.pick(callback)
   local entries = M.list(100)
@@ -225,17 +132,18 @@ function M.pick(callback)
     return
   end
 
-  local has_telescope = pcall(require, "telescope")
-  if has_telescope then
-    return telescope_pick(entries, callback)
-  end
-
-  local has_fzf = pcall(require, "fzf-lua")
-  if has_fzf then
-    return fzf_pick(entries, callback)
-  end
-
-  return native_pick(entries, callback)
+  require("dadbod-grip.grip_picker").open({
+    title = "Query History",
+    items = entries,
+    display = function(e)
+      local time_str = os.date("%Y-%m-%d %H:%M", e.ts)
+      local ms_str = e.elapsed_ms and (e.elapsed_ms .. "ms  ") or ""
+      return time_str .. "  " .. ms_str .. e.sql:sub(1, 60):gsub("\n", " ")
+    end,
+    on_select = function(e)
+      callback(e.sql, e)
+    end,
+  })
 end
 
 return M

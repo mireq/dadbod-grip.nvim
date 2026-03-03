@@ -1,6 +1,5 @@
 -- picker.lua — table picker with column preview.
--- Tries telescope → fzf-lua → vim.ui.select.
--- All functions return (result, err). Never throw.
+-- Uses grip_picker (zero external deps). Never throw.
 
 local db = require("dadbod-grip.db")
 
@@ -50,83 +49,6 @@ local function format_preview(table_name, url)
   return lines
 end
 
---- Telescope picker with async column preview.
-local function telescope_pick(tables, url, callback)
-  local pickers = require("telescope.pickers")
-  local finders = require("telescope.finders")
-  local conf = require("telescope.config").values
-  local actions = require("telescope.actions")
-  local action_state = require("telescope.actions.state")
-  local previewers = require("telescope.previewers")
-
-  pickers.new({}, {
-    prompt_title = "Grip Tables",
-    finder = finders.new_table({
-      results = tables,
-      entry_maker = function(entry)
-        local icon = entry.type == "view" and "○" or "●"
-        return {
-          value = entry,
-          display = icon .. " " .. entry.name,
-          ordinal = entry.name,
-        }
-      end,
-    }),
-    sorter = conf.generic_sorter({}),
-    previewer = previewers.new_buffer_previewer({
-      title = "Column Info",
-      define_preview = function(self, entry)
-        local lines = format_preview(entry.value.name, url)
-        vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, lines)
-      end,
-    }),
-    attach_mappings = function(prompt_bufnr)
-      actions.select_default:replace(function()
-        local entry = action_state.get_selected_entry()
-        actions.close(prompt_bufnr)
-        if entry then callback(entry.value.name) end
-      end)
-      return true
-    end,
-  }):find()
-end
-
---- fzf-lua picker.
-local function fzf_pick(tables, url, callback)
-  local fzf = require("fzf-lua")
-  local items = {}
-  for _, t in ipairs(tables) do
-    local icon = t.type == "view" and "○" or "●"
-    table.insert(items, icon .. " " .. t.name)
-  end
-
-  fzf.fzf_exec(items, {
-    prompt = "Grip Tables> ",
-    previewer = false,
-    actions = {
-      ["default"] = function(selected)
-        if selected and selected[1] then
-          local name = selected[1]:gsub("^[○●] ", "")
-          callback(name)
-        end
-      end,
-    },
-  })
-end
-
---- Native vim.ui.select fallback.
-local function native_pick(tables, callback)
-  local labels = {}
-  for _, t in ipairs(tables) do
-    local icon = t.type == "view" and "○" or "●"
-    table.insert(labels, icon .. " " .. t.name)
-  end
-
-  vim.ui.select(labels, { prompt = "Grip Tables:" }, function(_, idx)
-    if idx then callback(tables[idx].name) end
-  end)
-end
-
 --- Open table picker. Calls callback(table_name) on selection.
 function M.pick_table(url, callback)
   local tables, err = db.list_tables(url)
@@ -139,18 +61,17 @@ function M.pick_table(url, callback)
     return
   end
 
-  -- Try telescope → fzf-lua → vim.ui.select
-  local has_telescope = pcall(require, "telescope")
-  if has_telescope then
-    return telescope_pick(tables, url, callback)
-  end
-
-  local has_fzf = pcall(require, "fzf-lua")
-  if has_fzf then
-    return fzf_pick(tables, url, callback)
-  end
-
-  return native_pick(tables, callback)
+  require("dadbod-grip.grip_picker").open({
+    title = "Tables",
+    items = tables,
+    display = function(t)
+      local icon = t.type == "view" and "○" or "●"
+      return icon .. " " .. t.name
+    end,
+    on_select = function(t)
+      callback(t.name)
+    end,
+  })
 end
 
 --- Format column preview lines (exposed for schema.lua reuse).
