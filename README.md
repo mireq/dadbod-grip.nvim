@@ -1,6 +1,9 @@
 # dadbod-grip.nvim
 
-<img align="right" src="assets/mascot.gif" width="160" alt="Chonk, the dadbod-grip mascot"><br><p align="right"><sub>Chonk ᕦ( ᐛ )ᕤ</sub></p>
+<table align="right"><tr><td align="center">
+<img src="assets/mascot.gif" width="144" alt="Chonk the dadbod-grip mascot"><br>
+<sub><b>Chonk</b> ᕦ( ᐛ )ᕤ</sub>
+</td></tr></table>
 
 <p align="center">
   <a href="https://github.com/joryeugene/dadbod-grip.nvim/blob/main/LICENSE"><img src="https://img.shields.io/github/license/joryeugene/dadbod-grip.nvim.svg" alt="MIT License"></a>
