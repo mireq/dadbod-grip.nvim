@@ -81,9 +81,6 @@ lazy.nvim (recommended): >lua
 Recommended extras: >lua
   -- SQL completion in query pad (auto-completes table/column names)
   { "kristijanhusak/vim-dadbod-completion", ft = { "sql" } }
-
-  -- Better picker UX (optional, grip falls back to vim.ui.select)
-  { "nvim-telescope/telescope.nvim" }  -- or { "ibhagwan/fzf-lua" }
 <
 packer.nvim: >lua
   use {
@@ -142,8 +139,8 @@ All commands are global and available after the plugin loads.
 
                                                                *:GripTables*
 :GripTables
-  Open the table picker. Uses telescope.nvim if available, then fzf-lua,
-  then falls back to vim.ui.select. Shows column preview in the picker.
+  Open the table picker. Shows a floating list with column preview (PK,
+  FK markers, and types). Uses grip_picker with zero external dependencies.
 
                                                                 *:GripQuery*
 :GripQuery [sql]
@@ -198,9 +195,9 @@ All commands are global and available after the plugin loads.
                                                               *:GripHistory*
 :GripHistory
   Browse query history. Every query executed via :Grip, the query pad,
-  and staged DML is recorded in .grip/history.jsonl. Shows a picker
-  (telescope/fzf-lua/native) with timestamp and SQL preview. Selecting
-  an entry opens it in the query pad for review and re-execution.
+  and staged DML is recorded in .grip/history.jsonl. Shows a floating
+  picker with timestamp and SQL preview. Selecting an entry opens it in
+  the query pad for review and re-execution.
 
                                                                 *:GripDiff*
 :GripDiff {table1} {table2}
@@ -379,8 +376,7 @@ AND-ed together. Press `F` to clear all filters.
 Filter presets ~
 Press `gP` to save the current active filters as a named preset for the
 current table. Presets are stored in `.grip/filters.json` keyed by table
-name. Press `gp` to load a saved preset. The picker supports telescope,
-fzf-lua, and vim.ui.select.
+name. Press `gp` to load a saved preset using the grip_picker float.
 
 Paginate ~
 Results are paginated (default 100 rows per page). The status line shows
@@ -582,9 +578,9 @@ Every query executed through :Grip, the query pad, and staged DML is
 recorded in .grip/history.jsonl. Each entry includes the SQL, timestamp,
 connection URL, table name, query type, and execution time.
 
-Browse history with `:GripHistory` or `gh` from a grid buffer. The picker
-supports telescope, fzf-lua, and vim.ui.select. Selecting an entry opens
-it in the query pad for review and re-execution.
+Browse history with `:GripHistory` or `gh` from a grid buffer. The floating
+picker shows timestamp, elapsed ms, and SQL preview. Selecting an entry
+opens it in the query pad for review and re-execution.
 
 History is stored per-project (relative to .grip/ directory) and grows
 as an append-only JSONL file.

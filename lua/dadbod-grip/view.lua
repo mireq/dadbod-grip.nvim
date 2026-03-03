@@ -3034,7 +3034,7 @@ function M.show_help(opts)
       "",
       "  Schema & Workflow",
       "  go        Toggle schema browser",
-      "  gT        Pick table (fuzzy finder)",
+      "  gT        Pick table (floating picker)",
       "  gO        Open as editable table (read-only → table)",
       "  gC/<C-g>  Switch database connection",
       "  q         Open query pad",

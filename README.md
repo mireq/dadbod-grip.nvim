@@ -130,7 +130,7 @@ Full table metadata: columns, types, PKs, FKs, indexes, row estimates, and size.
 ### Query and Navigation
 - **Sort, filter, and pagination** using `s`/`S` to sort, `f`/`<C-f>`/`F` to filter, `gp`/`gP` for saved filter presets, and `]p`/`[p` to page.
 - **Foreign key navigation** via `gf` to follow a FK to its referenced row, and `<C-o>` to go back.
-- **Query history** via `gh` or `:GripHistory` browsing all executed queries with Telescope search, stored in `.grip/history.jsonl`.
+- **Query history** via `gh` or `:GripHistory` browsing all executed queries with timestamp and SQL preview, stored in `.grip/history.jsonl`.
 - **Data profiling** via `gR` or `:GripProfile` showing sparkline distributions, completeness, cardinality, and top values per column.
 - **Column statistics** via `gS` showing count, distinct, nulls, min/max, and top values.
 - **Aggregate on selection** via `ga` in visual mode showing count/sum/avg/min/max.
@@ -310,11 +310,11 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 |---------|-------------|
 | `:Grip [table\|SQL\|file]` | Open table, run query, or open file as table |
 | `:GripSchema` | Toggle schema browser sidebar |
-| `:GripTables` | Open table picker (telescope/fzf-lua/native) |
+| `:GripTables` | Open table picker with column preview |
 | `:GripQuery [sql]` | Open SQL query pad |
 | `:GripSave [name]` | Save query pad content to `.grip/queries/` |
 | `:GripLoad [name]` | Load a saved query (picker if no name) |
-| `:GripHistory` | Browse query history (telescope/fzf-lua/native) |
+| `:GripHistory` | Browse query history (timestamp + SQL preview) |
 | `:GripConnect [url]` | Connect and open workspace (schema + query pad) |
 | `:GripExplain [sql]` | Query Doctor: plain-English EXPLAIN with tips |
 | `:GripProfile [table]` | Profile columns with sparkline distributions |
@@ -356,9 +356,6 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 ```lua
 -- SQL completion in query pad (auto-completes table/column names)
 { "kristijanhusak/vim-dadbod-completion", ft = { "sql" } }
-
--- Better picker UX (optional, grip falls back to vim.ui.select)
-{ "nvim-telescope/telescope.nvim" }  -- or { "ibhagwan/fzf-lua" }
 ```
 
 ### packer.nvim
@@ -464,7 +461,7 @@ query.lua       → Pure query composition. Spec (value) → SQL string.
 db.lua          → I/O boundary + adapter dispatch by URL scheme.
 sql.lua         → Pure SQL generation. No DB calls, no state.
 schema.lua      → Sidebar tree browser. Tables, columns, PK/FK markers, DDL.
-picker.lua      → Table picker. Telescope → fzf-lua → vim.ui.select.
+picker.lua      → Table picker. grip_picker float with column preview.
 query_pad.lua   → SQL scratch buffer → grip grid results.
 saved.lua       → Query persistence in .grip/queries/*.sql.
 connections.lua → Connection profiles. .grip/connections.json + g:dbs.
@@ -472,7 +469,7 @@ filters.lua     → Saved filter presets. .grip/filters.json per table.
 properties.lua  → Table properties float. Columns, indexes, stats, DDL keymaps.
 ddl.lua         → Schema operations. Rename, add/drop column, create/drop table.
 diff.lua        → Data diff engine. PK-matched row comparison with color coding.
-history.lua     → Query history. JSONL storage, recording, 3-tier picker.
+history.lua     → Query history. JSONL storage, recording, grip_picker browser.
 profile.lua     → Data profiling. Sparkline distributions, column stats.
 ai.lua          → AI SQL generation. Multi-provider, schema context assembly.
 adapters/       → Per-database: postgresql, sqlite, mysql, duckdb.
@@ -526,15 +523,7 @@ Open each table with `:Grip <table_name>` and verify rendering, editing, sort/fi
 ### Recommended
 
 - **[vim-dadbod-completion](https://github.com/kristijanhusak/vim-dadbod-completion)** adds SQL table and column completion in the query pad.
-- **[telescope.nvim](https://github.com/nvim-telescope/telescope.nvim)** or **[fzf-lua](https://github.com/ibhagwan/fzf-lua)** for better fuzzy picker UX in `:GripTables` and `:GripLoad`.
-
-### Other tools in the ecosystem
-
-- [vim-dadbod-ui](https://github.com/kristijanhusak/vim-dadbod-ui) is a sidebar tree browser with saved queries and two-pane SQL workflow. Optional since grip has its own schema browser and query pad.
-- [nvim-dadbod-bg](https://github.com/napisani/nvim-dadbod-bg) is a browser-based result viewer built with Go and React.
-- [neosql.nvim](https://github.com/h4kbas/neosql.nvim) is a Lua-based cell editor for PostgreSQL only.
-- [nvim-dbee](https://github.com/kndndrj/nvim-dbee) uses a Go binary backend with columnar display.
-- [lazysql](https://github.com/jorgerojas26/lazysql) is a standalone Go TUI database client.
+- **[vim-dadbod-ui](https://github.com/kristijanhusak/vim-dadbod-ui)** is a sidebar tree browser with saved queries and two-pane SQL workflow. Optional since grip has its own schema browser and query pad.
 
 ---
 
