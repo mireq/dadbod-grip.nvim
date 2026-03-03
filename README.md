@@ -24,7 +24,7 @@ Edit data like a GUI. Navigate like Vim. Never leave your editor.
 </td>
 </tr></table>
 
-**Edit database tables like Vim buffers.** Visual staging with color-coded rows: modified in blue, inserted green, deleted red. A live SQL float updates as you stage changes. Preview the full mutation SQL before it touches the DB, then apply in a single transaction. Follow foreign keys through a breadcrumb trail. Open Parquet files and remote CSVs as live tables. Profile column distributions with sparklines. Get plain-English EXPLAIN. Generate SQL from natural language across four AI providers. Undo committed transactions. Every Vim motion works. Nothing installs outside Neovim.
+**Edit database tables like Vim buffers.** Rows are color-coded as you stage changes: blue for modified, red for deleted, green for inserted. A live SQL float generates the exact DML as you work. Preview the full mutation before it touches the DB, then apply in a single transaction. Reverse committed transactions. Navigate foreign keys through a breadcrumb trail. Browse schema in a sidebar with PK/FK markers and instant table open. Issue DDL through the UI: create tables, rename columns, drop with CASCADE. Profile column distributions with sparklines. Explain query plans in plain English. Generate SQL from natural language via Anthropic, OpenAI, Gemini, or Ollama. Open Parquet, CSV, and remote URLs as live DuckDB tables. Connects to PostgreSQL, SQLite, MySQL, and DuckDB. Every Vim motion works. Nothing installs outside Neovim.
 
 | **Editing** | **Analysis** | **Schema & AI** |
 |---|---|---|
@@ -32,6 +32,8 @@ Edit data like a GUI. Navigate like Vim. Never leave your editor.
 | **Batch edit** visual-mode multi-row ops | **Query Doctor** plain-English EXPLAIN | **DDL** create · rename · drop via UI |
 | **Mutation preview** full SQL before apply | **Visual staging** blue · green · red rows | **File as table** Parquet · CSV · remote URLs |
 | **Transaction undo** reverse committed changes | **Live SQL preview** float updates as you stage | **AI SQL** Anthropic · OpenAI · Gemini · Ollama |
+| **Schema browser** `gb` sidebar, PK/FK markers | **Data diff** `gD` compare tables by primary key | **Multi-DB** PostgreSQL · SQLite · MySQL · DuckDB |
+| **Saved queries** project-local `.grip/queries/` | **Export** CSV · TSV · JSON · SQL · Markdown · Table | **Connection profiles** global auto-persist |
 
 ## Quickstart
 
