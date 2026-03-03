@@ -36,10 +36,6 @@ Edit data like a GUI. Navigate like Vim. Never leave your editor.
 | **Saved queries** project-local `.grip/queries/` | **Export** CSV · TSV · JSON · SQL · Markdown · Table | **Connection profiles** global auto-persist |
 | **Tab views** `1`-`9` History · Stats · Explain · Columns · FK | **Column Stats** `4` null% · distinct · min · max | **Query History** `3` filtered per table |
 
-## Demo
-
-[Data science interview question in under 5 minutes](docs/demo-taxi.md) — 3.3M NYC taxi rows, no download, answered with ~35 keystrokes.
-
 ## Quickstart
 
 ```lua
