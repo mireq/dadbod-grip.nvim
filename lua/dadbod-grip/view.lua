@@ -2229,11 +2229,11 @@ function M._setup_keymaps(bufnr)
     local session_f = M._sessions[bufnr]
     if not session_f or not session_f.query_spec then return end
     if not confirm_discard_changes("Filter") then return end
-    vim.ui.input({ prompt = "WHERE clause (e.g. status='x' AND amount>0): " }, function(input)
-      if not input or input == "" then return end
-      local new_spec = qmod.add_filter(session_f.query_spec, input)
-      if session_f.on_requery then session_f.on_requery(bufnr, new_spec) end
-    end)
+    local CANCEL = "\0"
+    local ok, input = pcall(vim.fn.input, { prompt = "WHERE clause (e.g. status='x' AND amount>0): ", cancelreturn = CANCEL })
+    if not ok or input == CANCEL or input == "" then return end
+    local new_spec = qmod.add_filter(session_f.query_spec, input)
+    if session_f.on_requery then session_f.on_requery(bufnr, new_spec) end
   end, "Filter rows (WHERE clause)")
 
   -- F: clear all filters
@@ -2287,11 +2287,11 @@ function M._setup_keymaps(bufnr)
       table.insert(clauses, "(" .. f.clause .. ")")
     end
     local combined = table.concat(clauses, " AND ")
-    vim.ui.input({ prompt = "Save filter as: " }, function(name)
-      if not name or name == "" then return end
-      local filters = require("dadbod-grip.filters")
-      filters.save(tbl, name, combined)
-    end)
+    local CANCEL = "\0"
+    local ok, name = pcall(vim.fn.input, { prompt = "Save filter as: ", cancelreturn = CANCEL })
+    if not ok or name == CANCEL or name == "" then return end
+    local filters = require("dadbod-grip.filters")
+    filters.save(tbl, name, combined)
   end, "Save filter as preset")
 
   -- ]p: next page
@@ -2833,11 +2833,11 @@ function M._setup_keymaps(bufnr)
       vim.notify("Diff requires a table name", vim.log.levels.INFO)
       return
     end
-    vim.ui.input({ prompt = "Diff " .. st.table_name .. " against: " }, function(other)
-      if not other or other == "" then return end
-      local diff_mod = require("dadbod-grip.diff")
-      diff_mod.open(st.table_name, other, st.url)
-    end)
+    local CANCEL = "\0"
+    local ok, other = pcall(vim.fn.input, { prompt = "Diff " .. st.table_name .. " against: ", cancelreturn = CANCEL })
+    if not ok or other == CANCEL or other == "" then return end
+    local diff_mod = require("dadbod-grip.diff")
+    diff_mod.open(st.table_name, other, st.url)
   end, "Diff against table")
 
   -- go: toggle schema sidebar

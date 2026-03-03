@@ -79,17 +79,21 @@ end
 
 --- Set up buffer-local keymaps.
 local function setup_keymaps(bufnr, url)
+  -- Always read the live connection from the buffer variable so keymaps stay
+  -- correct after gC / gq / any other path that switches the connection.
+  local function cur_url() return vim.b[bufnr].db or vim.g.db or url end
+
   -- C-CR: run full buffer
   vim.keymap.set("n", "<C-CR>", function()
     local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-    run_sql(url, table.concat(lines, "\n"))
+    run_sql(cur_url(), table.concat(lines, "\n"))
   end, { buffer = bufnr, silent = true, desc = "Grip: run query" })
 
   -- C-CR in insert mode too
   vim.keymap.set("i", "<C-CR>", function()
     vim.cmd("stopinsert")
     local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-    run_sql(url, table.concat(lines, "\n"))
+    run_sql(cur_url(), table.concat(lines, "\n"))
   end, { buffer = bufnr, silent = true, desc = "Grip: run query" })
 
   -- Visual C-CR: run selection (line-wise — runs all selected lines)
@@ -101,7 +105,7 @@ local function setup_keymaps(bufnr, url)
     local end_line = vim.fn.line("'>")
     local lines = vim.api.nvim_buf_get_lines(bufnr, start_line - 1, end_line, false)
     if #lines == 0 then return end
-    run_sql(url, table.concat(lines, "\n"))
+    run_sql(cur_url(), table.concat(lines, "\n"))
   end, { buffer = bufnr, silent = true, desc = "Grip: run selection" })
 
   -- C-s: save query
@@ -113,12 +117,12 @@ local function setup_keymaps(bufnr, url)
   -- gA: AI SQL generation (keep g-prefix in query pad to preserve A=append-at-EOL)
   vim.keymap.set("n", "gA", function()
     local ai = require("dadbod-grip.ai")
-    ai.ask(url)
+    ai.ask(cur_url())
   end, { buffer = bufnr, silent = true, desc = "Grip: AI SQL generation" })
 
   -- go: toggle schema sidebar (same binding as grid)
   vim.keymap.set("n", "go", function()
-    require("dadbod-grip.schema").toggle(url)
+    require("dadbod-grip.schema").toggle(cur_url())
   end, { buffer = bufnr, silent = true, desc = "Grip: toggle schema sidebar" })
 
   -- gw: jump to grid window (if one exists)
@@ -137,8 +141,9 @@ local function setup_keymaps(bufnr, url)
   -- gT: table picker
   vim.keymap.set("n", "gT", function()
     local picker = require("dadbod-grip.picker")
-    picker.pick_table(url, function(name)
-      require("dadbod-grip").open(name, url)
+    local u = cur_url()
+    picker.pick_table(u, function(name)
+      require("dadbod-grip").open(name, u)
     end)
   end, { buffer = bufnr, silent = true, desc = "Grip: pick table" })
 
@@ -151,7 +156,7 @@ local function setup_keymaps(bufnr, url)
     end)
   end, { buffer = bufnr, silent = true, desc = "Grip: query history" })
 
-  -- gq: load saved query into buffer
+  -- gq: load saved query into buffer (cur_url() re-reads after any connection auto-switch)
   vim.keymap.set("n", "gq", function()
     local saved = require("dadbod-grip.saved")
     saved.pick(function(sql_content)

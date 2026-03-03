@@ -99,6 +99,17 @@ function M.toggle_delete(state, row_idx)
   return s
 end
 
+-- M.insert_row_with_values(state, after_idx, values) → State
+-- Adds a row with pre-populated values as a staged insert.
+-- Used by mutation preview to show INSERT VALUES rows highlighted green.
+function M.insert_row_with_values(state, after_idx, values)
+  local s = edit_copy(state)
+  local new_idx = s._next_insert_idx
+  s._next_insert_idx = s._next_insert_idx + 1
+  s.inserted[new_idx] = { _after = after_idx, values = values or {} }
+  return s
+end
+
 -- M.insert_row(state, after_idx) → State
 -- Adds a blank row placeholder after after_idx.
 function M.insert_row(state, after_idx)

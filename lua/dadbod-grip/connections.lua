@@ -251,16 +251,15 @@ end
 
 --- Prompt user to enter a new connection URL + name, then switch to it.
 local function prompt_new_connection()
-  vim.ui.input({ prompt = "Connection URL: " }, function(url)
-    if url and url ~= "" then
-      vim.ui.input({ prompt = "Connection name: " }, function(name)
-        if name and name ~= "" then
-          M.add(name, url)
-        end
-        M.switch(url, name)
-      end)
-    end
-  end)
+  local CANCEL = "\0"
+  local ok, url = pcall(vim.fn.input, { prompt = "Connection URL: ", cancelreturn = CANCEL })
+  if not ok or url == CANCEL or url == "" then return end
+
+  local ok2, name = pcall(vim.fn.input, { prompt = "Connection name: ", cancelreturn = CANCEL })
+  if not ok2 or name == CANCEL or name == "" then return end
+
+  M.add(name, url)
+  M.switch(url, name)
 end
 
 --- Open a picker to select and switch connection. Uses grip_picker (zero external deps).
@@ -301,19 +300,19 @@ function M.pick()
     end,
     on_delete = function(c, refresh_fn)
       if c._new then return end
-      vim.ui.input({ prompt = "Remove '" .. c.name .. "'? (y/N): " }, function(ans)
-        if ans == "y" or ans == "yes" then
-          M.remove(c.name)
-          -- Rebuild list with updated sentinel at end
-          local new_conns = M.list()
-          local new_items = {}
-          for _, nc in ipairs(new_conns) do
-            table.insert(new_items, nc)
-          end
-          table.insert(new_items, new_sentinel)
-          refresh_fn(new_items)
+      local CANCEL = "\0"
+      local ok, ans = pcall(vim.fn.input, { prompt = "Remove '" .. c.name .. "'? (y/N): ", cancelreturn = CANCEL })
+      if ok and (ans == "y" or ans == "yes") then
+        M.remove(c.name)
+        -- Rebuild list with updated sentinel at end
+        local new_conns = M.list()
+        local new_items = {}
+        for _, nc in ipairs(new_conns) do
+          table.insert(new_items, nc)
         end
-      end)
+        table.insert(new_items, new_sentinel)
+        refresh_fn(new_items)
+      end
     end,
   })
 end

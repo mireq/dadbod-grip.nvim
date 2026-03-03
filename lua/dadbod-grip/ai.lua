@@ -445,11 +445,12 @@ function M.ask(url)
   local existing_sql = query_pad.get_content()
   local caller_win = vim.api.nvim_get_current_win()  -- capture before async
 
-  vim.ui.input({ prompt = "Ask about your data: " }, function(question)
-    if not question or question == "" then return end
-    vim.notify("Generating SQL...", vim.log.levels.INFO)
-    vim.cmd("redraw")  -- force screen update before potential blocking schema fetch
-    M.generate_sql(question, url, function(result_sql, err)
+  local CANCEL = "\0"
+  local ok, question = pcall(vim.fn.input, { prompt = "Ask about your data: ", cancelreturn = CANCEL })
+  if not ok or question == CANCEL or question == "" then return end
+  vim.notify("Generating SQL...", vim.log.levels.INFO)
+  vim.cmd("redraw")  -- force screen update before potential blocking schema fetch
+  M.generate_sql(question, url, function(result_sql, err)
       if err then
         vim.notify("AI: " .. err, vim.log.levels.ERROR)
         return
@@ -460,8 +461,7 @@ function M.ask(url)
       end
       query_pad.open(url)
       query_pad.append_sql(result_sql, existing_sql and { replace = true } or nil)
-    end, existing_sql)
-  end)
+  end, existing_sql)
 end
 
 return M

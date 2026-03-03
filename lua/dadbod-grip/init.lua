@@ -80,8 +80,22 @@ local function resolve_query(arg, page_size)
 
   -- Detect statement type
   local upper = arg:upper():match("^%s*(%u+)")
-  if upper == "SELECT" or upper == "WITH" or upper == "TABLE" then
+  if upper == "SELECT" or upper == "TABLE" then
     return query.new_raw(arg, page_size), nil
+  end
+  -- WITH can be a read-only CTE (SELECT) or a mutating CTE (UPDATE/DELETE/INSERT).
+  -- Scan for mutation keywords to decide; default to SELECT if none found.
+  if upper == "WITH" then
+    local stripped = arg:upper():gsub("'[^']*'", ""):gsub("%-%-.-%\n", "")
+    if stripped:find("%f[%u]UPDATE%f[^%u]") or stripped:find("%f[%u]DELETE%f[^%u]")
+        or stripped:find("%f[%u]INSERT%f[^%u]") then
+      return nil, nil, nil, arg
+    end
+    return query.new_raw(arg, page_size), nil
+  end
+  -- REPLACE INTO (MySQL/SQLite): route through mutation preview like INSERT
+  if upper == "REPLACE" then
+    return nil, nil, nil, arg
   end
   -- Destructive statements: execute directly, don't wrap in SELECT
   if upper == "UPDATE" or upper == "DELETE" or upper == "INSERT"
@@ -302,6 +316,87 @@ local function do_edit(bufnr, cell, url)
   end)
 end
 
+-- ── parse INSERT VALUES ───────────────────────────────────────────────────
+-- Best-effort parser for INSERT ... VALUES (...), (...).
+-- Returns list of {col = val} tables. Skips INSERT...SELECT (no VALUES keyword).
+local function parse_insert_values(flat, columns)
+  if not flat:find("[Vv][Aa][Ll][Uu][Ee][Ss]") then return {} end
+
+  -- Extract column list between INSERT INTO tbl (...) VALUES
+  -- Pattern: everything in parens before the VALUES keyword
+  local col_str = flat:match("[Ii][Nn][Ss][Ee][Rr][Tt][^(]+%(([^)]+)%)%s*[Vv][Aa][Ll][Uu][Ee][Ss]")
+  local insert_cols
+  if col_str then
+    insert_cols = {}
+    for part in col_str:gmatch("[^,]+") do
+      local col = part:match("^%s*(.-)%s*$"):gsub('^"(.*)"$', "%1"):gsub("^`(.*)`$", "%1")
+      if col ~= "" then table.insert(insert_cols, col) end
+    end
+  else
+    insert_cols = columns  -- no column list: assume schema order
+  end
+  if #insert_cols == 0 then return {} end
+
+  local values_part = flat:match("[Vv][Aa][Ll][Uu][Ee][Ss]%s*(.*)")
+  if not values_part then return {} end
+
+  local rows = {}
+  local pos = 1
+  while pos <= #values_part do
+    local pstart = values_part:find("%(", pos)
+    if not pstart then break end
+    -- Walk to matching ')' respecting single-quoted strings
+    local depth, i = 1, pstart + 1
+    while i <= #values_part and depth > 0 do
+      local ch = values_part:sub(i, i)
+      if ch == "'" then
+        i = i + 1
+        while i <= #values_part do
+          if values_part:sub(i, i) == "'" then
+            if values_part:sub(i + 1, i + 1) == "'" then i = i + 2
+            else i = i + 1; break end
+          else i = i + 1 end
+        end
+      elseif ch == "(" then depth = depth + 1; i = i + 1
+      elseif ch == ")" then depth = depth - 1; i = i + 1
+      else i = i + 1 end
+    end
+    local tuple = values_part:sub(pstart + 1, i - 2)
+    pos = i
+
+    -- Tokenize the tuple
+    local vals, ti, tn = {}, 1, #tuple
+    while ti <= tn do
+      while ti <= tn and (tuple:sub(ti, ti) == "," or tuple:sub(ti, ti):match("^%s$")) do ti = ti + 1 end
+      if ti > tn then break end
+      local token
+      if tuple:sub(ti, ti) == "'" then
+        local tj = ti + 1
+        while tj <= tn do
+          if tuple:sub(tj, tj) == "'" then
+            if tuple:sub(tj + 1, tj + 1) == "'" then tj = tj + 2
+            else break end
+          else tj = tj + 1 end
+        end
+        token = tuple:sub(ti + 1, tj - 1):gsub("''", "'")
+        ti = tj + 1
+      else
+        local tj = ti
+        while tj <= tn and tuple:sub(tj, tj) ~= "," do tj = tj + 1 end
+        token = tuple:sub(ti, tj - 1):match("^%s*(.-)%s*$")
+        if token:upper() == "NULL" then token = nil end
+        ti = tj
+      end
+      table.insert(vals, token)
+    end
+
+    local row = {}
+    for j, col in ipairs(insert_cols) do row[col] = vals[j] end
+    table.insert(rows, row)
+  end
+  return rows
+end
+
 -- ── mutation preview ──────────────────────────────────────────────────────
 -- Shows affected rows in a grid before executing UPDATE/DELETE/INSERT.
 function M._mutation_preview(mutation_sql, url, stmt_type, caller_opts)
@@ -404,6 +499,15 @@ function M._mutation_preview(mutation_sql, url, stmt_type, caller_opts)
     end
   end
 
+  -- For INSERT with VALUES: parse and add new rows highlighted green
+  if stmt_type == "INSERT" then
+    local insert_rows = parse_insert_values(flat, result.columns)
+    for _, row_values in ipairs(insert_rows) do
+      state = data.insert_row_with_values(state, #result.rows, row_values)
+    end
+    row_count = #insert_rows  -- count = rows being inserted, not existing rows
+  end
+
   -- Open grid with pending_mutation metadata
   local reuse_win = caller_opts and caller_opts.reuse_win
   local view_opts = {
@@ -425,7 +529,13 @@ function M._mutation_preview(mutation_sql, url, stmt_type, caller_opts)
     session.pending_mutation = view_opts.pending_mutation
     session.query_spec = query.new_raw(preview_sql, OPTS.limit)
     if stmt_type == "INSERT" then
-      session._mutation_title = string.format("INSERT into %s (current state)", table_name)
+      if row_count > 0 then
+        session._mutation_title = string.format("INSERT into %s (%d new row%s)",
+          table_name, row_count, row_count == 1 and "" or "s")
+      else
+        -- INSERT ... SELECT or unparseable VALUES
+        session._mutation_title = string.format("INSERT into %s (current state)", table_name)
+      end
     else
       session._mutation_title = string.format("%s %s (%d row%s)",
         stmt_type, table_name, row_count, row_count == 1 and "" or "s")
@@ -463,14 +573,17 @@ function M.open(arg, url, opts)
     end
     local stmt_type = mutation_sql:upper():match("^%s*(%u+)") or "SQL"
 
-    -- For UPDATE/DELETE/INSERT: show preview grid with a:execute / U:cancel
-    if stmt_type == "UPDATE" or stmt_type == "DELETE" or stmt_type == "INSERT" then
-      M._mutation_preview(mutation_sql, exec_conn, stmt_type, opts)
+    -- For UPDATE/DELETE/INSERT/REPLACE: show preview grid with a:execute / U:cancel
+    if stmt_type == "UPDATE" or stmt_type == "DELETE" or stmt_type == "INSERT"
+        or stmt_type == "REPLACE" then
+      -- Treat REPLACE as INSERT for preview purposes
+      local preview_type = (stmt_type == "REPLACE") and "INSERT" or stmt_type
+      M._mutation_preview(mutation_sql, exec_conn, preview_type, opts)
       return
     end
 
     -- For DDL (ALTER/DROP/CREATE/etc.): confirm then execute
-    local label = stmt_type == "INSERT" and "Execute INSERT?" or ("Execute " .. stmt_type .. "?")
+    local label = ("Execute " .. stmt_type .. "?")
     local choice = vim.fn.confirm(label .. "\n\n" .. mutation_sql:sub(1, 200), "&Execute\n&Cancel", 2)
     if choice ~= 1 then return end
 

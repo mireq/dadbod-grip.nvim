@@ -247,12 +247,12 @@ local function render(state)
   table.insert(lines, "")
   local sw = math.max(SIDEBAR_MIN_WIDTH, math.min(SIDEBAR_MAX_WIDTH, math.floor(vim.o.columns * SIDEBAR_WIDTH_RATIO)))
   if sw >= 40 then
-    table.insert(lines, " CR:open  q:query  gq:saved  gw:grid  gC:connect  /:filter  ?:help")
+    table.insert(lines, " CR:open  q:query  gq:saved  gw:grid  gC:connect  /:filter  F:clear  ?:help")
     table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripReadonly" })
   else
     table.insert(lines, " CR:open  q:query  gq:saved  gw:grid")
     table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripReadonly" })
-    table.insert(lines, " gC:connect  /:filter  ?:help")
+    table.insert(lines, " gC:connect  /:filter  F:clear  ?:help")
     table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripReadonly" })
   end
 
@@ -319,6 +319,46 @@ local function open_table_split(table_name, url)
     vim.api.nvim_set_current_win(target_win)
   end
   grip.open(table_name, url, { force_split = true })
+end
+
+--- Line number offset for node list (title + blank [+ filter + blank]).
+local function node_offset(state)
+  return state.filter and 4 or 2
+end
+
+--- Move sidebar cursor to first table node.
+local function jump_to_first_table(state)
+  if not _sidebar_winid or not vim.api.nvim_win_is_valid(_sidebar_winid) then return end
+  local offset = node_offset(state)
+  for i, node in ipairs(state.nodes) do
+    if node.kind == "table" then
+      pcall(vim.api.nvim_win_set_cursor, _sidebar_winid, { offset + i, 0 })
+      return
+    end
+  end
+end
+
+--- Navigate to next (+1) or prev (-1) table node, wrapping at ends.
+local function jump_to_next_table(state, direction)
+  if not _sidebar_winid or not vim.api.nvim_win_is_valid(_sidebar_winid) then return end
+  local offset = node_offset(state)
+  local cur_line = vim.api.nvim_win_get_cursor(_sidebar_winid)[1]
+  local tlines = {}
+  for i, node in ipairs(state.nodes) do
+    if node.kind == "table" then table.insert(tlines, offset + i) end
+  end
+  if #tlines == 0 then return end
+  if direction > 0 then
+    for _, ln in ipairs(tlines) do
+      if ln > cur_line then pcall(vim.api.nvim_win_set_cursor, _sidebar_winid, { ln, 0 }); return end
+    end
+    pcall(vim.api.nvim_win_set_cursor, _sidebar_winid, { tlines[1], 0 })
+  else
+    for i = #tlines, 1, -1 do
+      if tlines[i] < cur_line then pcall(vim.api.nvim_win_set_cursor, _sidebar_winid, { tlines[i], 0 }); return end
+    end
+    pcall(vim.api.nvim_win_set_cursor, _sidebar_winid, { tlines[#tlines], 0 })
+  end
 end
 
 --- Set up buffer-local keymaps.
@@ -404,14 +444,28 @@ local function setup_keymaps(url)
     render(state)
   end)
 
-  -- Filter/search
+  -- Filter/search — vim.fn.input() avoids dressing/noice float interception
   map("/", function()
-    vim.ui.input({ prompt = "Filter: ", default = state.filter or "" }, function(input)
-      if input == nil then return end
-      state.filter = (input ~= "") and input or nil
-      render(state)
-    end)
+    local CANCEL = "\0"
+    local ok, input = pcall(vim.fn.input, { prompt = "Filter: ", default = state.filter or "", cancelreturn = CANCEL })
+    if not ok or input == CANCEL then return end
+    state.filter = (input ~= "") and input or nil
+    render(state)
+    if state.filter then
+      vim.schedule(function() jump_to_first_table(state) end)
+    end
   end)
+
+  -- F: clear filter and jump to first table
+  map("F", function()
+    state.filter = nil
+    render(state)
+    vim.schedule(function() jump_to_first_table(state) end)
+  end)
+
+  -- n/N: navigate between table nodes (wraps)
+  map("n", function() jump_to_next_table(state, 1) end)
+  map("N", function() jump_to_next_table(state, -1) end)
 
   -- Refresh
   map("r", function()
@@ -423,11 +477,26 @@ local function setup_keymaps(url)
     render(state)
   end)
 
-  -- Table picker
-  map("gT", function()
-    local picker = require("dadbod-grip.picker")
-    picker.pick_table(url, function(name) open_table(name, url) end)
+  -- Yank table/column name to clipboard
+  map("y", function()
+    local node = node_at_cursor(state)
+    if not node then return end
+    local name = (node.kind == "table" and node.name)
+              or (node.kind == "column" and node.name)
+              or nil
+    if name then
+      vim.fn.setreg("+", name)
+      vim.fn.setreg('"', name)
+      vim.notify("Copied: " .. name, vim.log.levels.INFO)
+    end
   end)
+
+  -- Table picker (gT and gt alias)
+  local function _pick_table()
+    require("dadbod-grip.picker").pick_table(url, function(name) open_table(name, url) end)
+  end
+  map("gT", _pick_table)
+  map("gt", _pick_table)
 
   -- Query pad
   map("q", function()
@@ -439,6 +508,13 @@ local function setup_keymaps(url)
   map("gq", function()
     local saved = require("dadbod-grip.saved")
     saved.pick(function(sql_content)
+      require("dadbod-grip.query_pad").open(url, { initial_sql = sql_content })
+    end)
+  end)
+
+  -- Query history → load into query pad
+  map("gh", function()
+    require("dadbod-grip.history").pick(function(sql_content)
       require("dadbod-grip.query_pad").open(url, { initial_sql = sql_content })
     end)
   end)
@@ -456,11 +532,12 @@ local function setup_keymaps(url)
     vim.notify("No grid window open", vim.log.levels.INFO)
   end)
 
-  -- Switch connection
+  -- Switch connection (gC, gc, and C-g)
   local function _pick_conn()
     require("dadbod-grip.connections").pick()
   end
   map("gC", _pick_conn)
+  map("gc", _pick_conn)
   map("<C-g>", _pick_conn)
 
   -- DDL: drop table
@@ -509,12 +586,16 @@ local function setup_keymaps(url)
       "  L         Expand all",
       "  H         Collapse all",
       "  /         Filter by name",
+      "  F         Clear filter",
       "",
       "  Actions",
       "  r         Refresh schema",
-      "  gT        Table picker",
+      "  y         Yank table/column name",
+      "  gT / gt   Table picker",
       "  gw        Jump to grid",
-      "  gC/<C-g>  Switch connection",
+      "  gC / gc   Switch connection",
+      "  gh        Query history",
+      "  gq        Saved queries",
       "  q         Query pad",
       "  D         Drop table (confirm)",
       "  +         Create table",
@@ -564,10 +645,17 @@ local function sidebar_width()
 end
 
 --- Open or toggle the schema sidebar.
+-- From outside the sidebar: focus it (open if needed).
+-- From inside the sidebar: close it.
 function M.toggle(url)
-  -- If sidebar is visible, close it
   if _sidebar_winid and vim.api.nvim_win_is_valid(_sidebar_winid) then
-    M.close()
+    if vim.api.nvim_get_current_win() == _sidebar_winid then
+      -- Already in sidebar → close (toggle off)
+      M.close()
+    else
+      -- Not in sidebar → just focus it
+      vim.api.nvim_set_current_win(_sidebar_winid)
+    end
     return
   end
 

@@ -60,14 +60,13 @@ function M.save_prompt(bufnr)
     return
   end
   vim.schedule(function()
-    vim.ui.input({ prompt = "Save query as: " }, function(name)
-      if name and name ~= "" then
-        -- Prefer buffer-local db (set by DBUI), then global
-        local url = vim.b[bufnr].db or vim.g.db or ""
-        M.save(name, content, url)
-        vim.bo[bufnr].modified = false
-      end
-    end)
+    local CANCEL = "\0"
+    local ok, name = pcall(vim.fn.input, { prompt = "Save query as: ", cancelreturn = CANCEL })
+    if not ok or name == CANCEL or name == "" then return end
+    -- Prefer buffer-local db (set by DBUI), then global
+    local url = vim.b[bufnr].db or vim.g.db or ""
+    M.save(name, content, url)
+    vim.bo[bufnr].modified = false
   end)
 end
 
@@ -129,6 +128,17 @@ function M.pick(callback)
     title = "Saved Queries",
     items = queries,
     display = function(q) return q.name end,
+    preview = function(q)
+      local ok, raw_lines = pcall(vim.fn.readfile, q.path)
+      if not ok then return { "(file not readable)" } end
+      local raw = table.concat(raw_lines, "\n")
+      local content = extract_url(raw)  -- strip "-- grip:url=..." header
+      local out = {}
+      for _, ln in ipairs(vim.split(content:match("^%s*(.-)%s*$"), "\n", { plain = true })) do
+        table.insert(out, ln)
+      end
+      return #out > 0 and out or { "(empty)" }
+    end,
     on_select = function(q)
       local raw = table.concat(vim.fn.readfile(q.path), "\n")
       local content, url = extract_url(raw)
@@ -138,12 +148,12 @@ function M.pick(callback)
       callback(content, q.name)
     end,
     on_delete = function(q, refresh_fn)
-      vim.ui.input({ prompt = "Delete '" .. q.name .. "'? (y/N): " }, function(ans)
-        if ans == "y" or ans == "yes" then
-          M.delete(q.name)
-          refresh_fn(M.list())
-        end
-      end)
+      local CANCEL = "\0"
+      local ok, ans = pcall(vim.fn.input, { prompt = "Delete '" .. q.name .. "'? (y/N): ", cancelreturn = CANCEL })
+      if ok and (ans == "y" or ans == "yes") then
+        M.delete(q.name)
+        refresh_fn(M.list())
+      end
     end,
   })
 end

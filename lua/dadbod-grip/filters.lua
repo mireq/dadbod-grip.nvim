@@ -116,16 +116,19 @@ function M.pick(table_name, callback)
     display = function(p)
       return p.name .. "  (" .. p.clause:sub(1, 40) .. ")"
     end,
+    preview = function(p)
+      return { "WHERE " .. (p.clause or "") }
+    end,
     on_select = function(p)
       callback(p)
     end,
     on_delete = function(p, refresh_fn)
-      vim.ui.input({ prompt = "Delete preset '" .. p.name .. "'? (y/N): " }, function(ans)
-        if ans == "y" or ans == "yes" then
-          M.delete(table_name, p.name)
-          refresh_fn(M.list(table_name))
-        end
-      end)
+      local CANCEL = "\0"
+      local ok, ans = pcall(vim.fn.input, { prompt = "Delete preset '" .. p.name .. "'? (y/N): ", cancelreturn = CANCEL })
+      if ok and (ans == "y" or ans == "yes") then
+        M.delete(table_name, p.name)
+        refresh_fn(M.list(table_name))
+      end
     end,
   })
 end

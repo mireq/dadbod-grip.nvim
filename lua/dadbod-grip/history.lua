@@ -140,6 +140,10 @@ function M.pick(callback)
       local ms_str = e.elapsed_ms and (e.elapsed_ms .. "ms  ") or ""
       return time_str .. "  " .. ms_str .. e.sql:sub(1, 60):gsub("\n", " ")
     end,
+    preview = function(e)
+      if not e.sql or e.sql == "" then return { "(no SQL)" } end
+      return vim.split(e.sql, "\n", { plain = true })
+    end,
     on_select = function(e)
       callback(e.sql, e)
     end,
