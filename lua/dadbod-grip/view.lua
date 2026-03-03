@@ -49,8 +49,8 @@ local function ensure_highlights()
   vim.cmd("hi! GripModified  gui=bold ctermfg=111 guifg=#89b4fa ctermbg=236 guibg=#1a1e2e")
   vim.cmd("hi! GripDeleted   gui=strikethrough ctermfg=203 guifg=#f38ba8 ctermbg=236 guibg=#2d1418")
   vim.cmd("hi! GripInserted  gui=bold ctermfg=113 guifg=#a6e3a1 ctermbg=236 guibg=#162d18")
-  -- Staged NULL: red fg on same dark-blue bg as GripModified — signals "value cleared"
-  vim.cmd("hi! GripNullStaged gui=bold ctermfg=203 guifg=#f38ba8 ctermbg=236 guibg=#1a1e2e")
+  -- Staged NULL: pink fg on same dark-blue bg as GripModified — signals "value cleared" (distinct from red=deleted)
+  vim.cmd("hi! GripNullStaged gui=bold ctermfg=219 guifg=#f5c2e7 ctermbg=236 guibg=#1a1e2e")
   vim.cmd("hi! GripReadonly  gui=italic ctermfg=243 guifg=#6c7086")
   vim.cmd("hi! GripBorder    gui=bold ctermfg=147 guifg=#cba6f7")
   vim.cmd("hi! GripStatusOk  gui=bold ctermfg=229 guifg=#f9e2af")
@@ -587,9 +587,13 @@ function M.update_table_sessions(old_name, new_name)
   local new_quoted = sql_mod.quote_ident(new_name)
   for bufnr, session in pairs(M._sessions) do
     if session.state and session.state.table_name == old_name then
-      -- Update the query SQL string in-place (replace first occurrence)
+      -- Update the query SQL string in-place (replace first occurrence, escaped)
       if session.query_sql then
-        session.query_sql = session.query_sql:gsub(old_quoted, new_quoted, 1)
+        session.query_sql = session.query_sql:gsub(vim.pesc(old_quoted), new_quoted, 1)
+      end
+      -- Update query_spec.table_name so on_refresh rebuilds SQL with new name
+      if session.query_spec and session.query_spec.table_name == old_name then
+        session.query_spec = vim.tbl_extend("force", session.query_spec, { table_name = new_name })
       end
       -- Update state table_name
       session.state = vim.tbl_extend("force", session.state, { table_name = new_name })

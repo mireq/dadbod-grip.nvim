@@ -164,14 +164,44 @@ local function do_apply(bufnr, url)
     table.insert(reverse_stmts, sql.build_update(st.table_name, upd.pk_values, orig_values))
   end
 
-  -- Reverse of INSERT = DELETE by PK (inserts have no row_idx in original data,
-  -- so we build the PK from the inserted values themselves)
+  -- Reverse of INSERT = DELETE by PK.
+  -- If the user typed an explicit PK (plain INSERT), use it directly.
+  -- If PK was auto-assigned (clone / new-row with SERIAL/UUID), find the row
+  -- by matching non-PK values after commit, then build reverse DELETE.
   for _, ins in ipairs(inserts) do
     local ins_pk_values = {}
     for _, pk in ipairs(st.pks) do
       ins_pk_values[pk] = ins.values[pk]
     end
-    -- Only generate reverse DELETE if we have PK values
+
+    if not next(ins_pk_values) and #st.pks > 0 then
+      -- Auto-assigned PK: locate the row by non-PK values (best-effort)
+      local pk_set = {}
+      for _, pk in ipairs(st.pks) do pk_set[pk] = true end
+      local where_parts = {}
+      for col, val in pairs(ins.values) do
+        if not pk_set[col] and val and val ~= "" and val ~= data.NULL_SENTINEL then
+          table.insert(where_parts, sql.quote_ident(col) .. " = " .. sql.quote_value(tostring(val)))
+        end
+      end
+      if #where_parts > 0 then
+        local pk_cols = table.concat(vim.tbl_map(function(pk)
+          return sql.quote_ident(pk)
+        end, st.pks), ", ")
+        -- ORDER BY pk DESC picks the highest (most recently inserted) matching row
+        local find_sql = "SELECT " .. pk_cols
+          .. " FROM " .. sql.quote_ident(st.table_name)
+          .. " WHERE " .. table.concat(where_parts, " AND ")
+          .. " ORDER BY " .. sql.quote_ident(st.pks[1]) .. " DESC LIMIT 1"
+        local r, _ = db.query(find_sql, url)
+        if r and r.rows and r.rows[1] then
+          for i, pk in ipairs(st.pks) do
+            ins_pk_values[pk] = r.rows[1][i]
+          end
+        end
+      end
+    end
+
     if next(ins_pk_values) then
       table.insert(reverse_stmts, sql.build_delete(st.table_name, ins_pk_values))
     end
@@ -536,8 +566,11 @@ function M.open(arg, url, opts)
   view.set_callbacks(bufnr, {
     on_refresh = function(bid)
       local s = view._sessions[bid]
-      local sql_str = s and s.query_spec and query.build_sql(s.query_spec) or query_sql
-      do_refresh(bid, conn, sql_str, table_name_arg)
+      if not s then return end
+      -- Read current table name from session state (may have been updated by rename)
+      local current_table = (s.state and s.state.table_name) or table_name_arg
+      local sql_str = s.query_spec and query.build_sql(s.query_spec) or query_sql
+      do_refresh(bid, conn, sql_str, current_table)
     end,
     on_requery = function(bid, new_spec)
       local s = view._sessions[bid]
