@@ -247,7 +247,7 @@ NAVIGATION ~
 EDITING ~
                                                             *grip-editing*
   e               Edit cell under cursor (opens float editor)
-  n               Set cell to NULL
+  x               Set cell to NULL
   p               Paste clipboard value into cell
   P               Paste multi-line clipboard into consecutive rows
   o               Insert new blank row after cursor
@@ -260,7 +260,7 @@ BATCH EDITING (visual mode) ~
                                                       *grip-batch-editing*
   e               Set all selected cells in column to same value
   d               Toggle delete on all selected rows
-  n               Set all selected cells in column to NULL
+  x               Set all selected cells in column to NULL
   y               Yank selected cells in column (newline-separated)
 
 SORT / FILTER / PAGINATION ~
@@ -268,6 +268,7 @@ SORT / FILTER / PAGINATION ~
   s               Toggle sort on column (ASC then DESC then off)
   S               Stack secondary sort on column
   f               Quick filter by cell value (column = value)
+  gn              Filter: column under cursor IS NULL
   <C-f>           Freeform WHERE clause filter
   F               Clear all filters
   gp              Load saved filter preset for current table
@@ -290,6 +291,7 @@ ANALYSIS AND EXPORT ~
                   Shows count, distinct, nulls, min/max, top values
   gx              Explain current query plan
   gR              Table profile (sparkline distributions)
+  gV              Show CREATE TABLE DDL in floating window
   gD              Diff current table against another table
   gE              Export table in 6 formats (see |grip-export|)
 
@@ -301,10 +303,16 @@ INSPECTION ~
   gI              Table properties (columns, indexes, stats)
   ge              Explain cell under cursor (type, nullable, constraints)
 
-COLUMN PINNING ~
-                                                     *grip-column-pinning*
-  1 - 9           Pin/freeze N leftmost columns with thick separator
-  0               Unpin all (or first column if none pinned)
+TAB VIEWS ~
+                                                        *grip-tab-views*
+  2               Records (data rows, default view)
+  3               Query history for current table
+  4               Column statistics (count, nulls, distinct, min/max)
+  5               Explain current query plan
+  6               Columns (name, type, nullable, default, constraints)
+  7               Foreign keys (outbound + inbound references)
+  8               Indexes (name, type, columns covered)
+  9               Constraints (CHECK and UNIQUE rules)
 
 COLUMN VISIBILITY ~
                                                   *grip-column-visibility*
@@ -353,7 +361,7 @@ Color coding:
   Green ............ Newly inserted row
 
 Workflow:
-  1. Edit cells with `e`, set NULL with `n`, paste with `p`
+  1. Edit cells with `e`, set NULL with `x`, paste with `p`
   2. Insert rows with `o`, mark deletions with `d`
   3. Preview staged SQL with `gs` or live preview with `gl`
   4. Apply all changes with `a` (wraps in BEGIN/COMMIT transaction)

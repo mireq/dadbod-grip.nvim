@@ -2914,6 +2914,34 @@ function M._setup_keymaps(bufnr)
     vim.notify("Filters cleared", vim.log.levels.INFO)
   end, "Clear all filters")
 
+  -- gn: filter column IS NULL
+  map("gn", function()
+    local session_n = M._sessions[bufnr]
+    if not session_n or not session_n.query_spec then return end
+    local col_name
+    local cell = M.get_cell(bufnr)
+    if cell then
+      col_name = cell.col_name
+    else
+      local r = session_n._render
+      if r then
+        local col_nr = vim.api.nvim_win_get_cursor(0)[2]
+        local cols = r.visible_columns or session_n.state.columns
+        if r.hdr_byte_positions then
+          local snapped = M._snap_col(cols, r.hdr_byte_positions, col_nr)
+          if snapped then col_name = snapped.col_name end
+        end
+      end
+    end
+    if not col_name then
+      vim.notify("Move cursor to a column first", vim.log.levels.INFO)
+      return
+    end
+    local new_spec = qmod.quick_filter(session_n.query_spec, col_name, nil)
+    if session_n.on_requery then session_n.on_requery(bufnr, new_spec) end
+    vim.notify(col_name .. " IS NULL", vim.log.levels.INFO)
+  end, "Filter: column IS NULL")
+
   -- gp: load a saved filter preset
   map("gp", function()
     local session_fp = M._sessions[bufnr]
@@ -3504,6 +3532,82 @@ function M._setup_keymaps(bufnr)
     diff_mod.open(st.table_name, other, st.url)
   end, "Diff against table")
 
+  -- gV: show CREATE TABLE DDL in floating window
+  map("gV", function()
+    local session_v = M._sessions[bufnr]
+    if not session_v then return end
+    local tbl = session_v.state.table_name
+    if not tbl then
+      vim.notify("DDL view requires a table name", vim.log.levels.INFO)
+      return
+    end
+    local url = session_v.state.url
+    local grip_win = vim.api.nvim_get_current_win()
+
+    local cols = db.get_column_info(tbl, url) or {}
+    local pks  = db.get_primary_keys(tbl, url) or {}
+    local fks  = (db.get_foreign_keys(tbl, url)) or {}
+    local idxs = (db.get_indexes(tbl, url)) or {}
+
+    local pk_set, fk_map = {}, {}
+    for _, pk in ipairs(pks) do pk_set[pk] = true end
+    for _, fk in ipairs(fks) do fk_map[fk.column] = fk end
+
+    local lines = { "CREATE TABLE " .. sql.quote_ident(tbl) .. " (" }
+    local col_lines = {}
+    for _, col in ipairs(cols) do
+      local chunk = "  " .. sql.quote_ident(col.column_name) .. " " .. (col.data_type or "TEXT")
+      if col.column_default and col.column_default ~= "" then
+        chunk = chunk .. " DEFAULT " .. col.column_default
+      end
+      if col.is_nullable == "NO" or col.is_nullable == false then
+        chunk = chunk .. " NOT NULL"
+      end
+      local remarks = {}
+      if pk_set[col.column_name] then table.insert(remarks, "PK") end
+      if fk_map[col.column_name] then
+        local fk = fk_map[col.column_name]
+        table.insert(remarks, "FK -> " .. fk.ref_table .. "." .. fk.ref_column)
+      end
+      if #remarks > 0 then chunk = chunk .. "  -- " .. table.concat(remarks, ", ") end
+      table.insert(col_lines, chunk)
+    end
+    if #pks > 0 then
+      local pk_cols = {}
+      for _, pk in ipairs(pks) do table.insert(pk_cols, sql.quote_ident(pk)) end
+      table.insert(col_lines, "  PRIMARY KEY (" .. table.concat(pk_cols, ", ") .. ")")
+    end
+    for _, fk in ipairs(fks) do
+      table.insert(col_lines, string.format(
+        "  FOREIGN KEY (%s) REFERENCES %s(%s)",
+        sql.quote_ident(fk.column), sql.quote_ident(fk.ref_table), sql.quote_ident(fk.ref_column)
+      ))
+    end
+    for i, line in ipairs(col_lines) do
+      table.insert(lines, i < #col_lines and (line .. ",") or line)
+    end
+    table.insert(lines, ");")
+
+    local non_pk_idxs = {}
+    for _, idx in ipairs(idxs) do
+      if idx.type ~= "PRIMARY" then table.insert(non_pk_idxs, idx) end
+    end
+    if #non_pk_idxs > 0 then
+      table.insert(lines, "")
+      for _, idx in ipairs(non_pk_idxs) do
+        local unique = idx.type == "UNIQUE" and "UNIQUE " or ""
+        local idx_cols = type(idx.columns) == "table"
+          and table.concat(idx.columns, ", ") or tostring(idx.columns or "")
+        table.insert(lines, string.format(
+          "CREATE %sINDEX %s ON %s (%s);",
+          unique, sql.quote_ident(idx.name or "idx"), sql.quote_ident(tbl), idx_cols
+        ))
+      end
+    end
+
+    open_info_float(grip_win, lines, { title = " DDL: " .. tbl .. " ", filetype = "sql" })
+  end, "Show CREATE TABLE DDL")
+
   -- gb: schema browser sidebar (toggle/focus)
   map("gb", function()
     local schema = require("dadbod-grip.schema")
@@ -3758,6 +3862,7 @@ function M.show_help(opts)
       "  s         Toggle sort on column (ASC→DESC→off)",
       "  S         Stack sort on column (stackable: press S on multiple cols for ▲1 ▼2 ▲3)",
       "  f         Quick filter by cell value",
+      "  gn        Filter: column IS NULL",
       "  <C-f>     Freeform WHERE clause filter",
       "            ↳ e.g.: status = 'active'",
       "            ↳ e.g.: created_at > '2024-01-01' AND amount > 100",
@@ -3779,6 +3884,7 @@ function M.show_help(opts)
       "  ga        Aggregate selected cells (visual mode)",
       "  gS        Column statistics popup",
       "  gR        Table profile (sparkline distributions)",
+      "  gV        Show CREATE TABLE DDL",
       "  gx        Explain current query plan",
       "  gD        Diff against another table",
       "  gE        Export (CSV, TSV, JSON, SQL, Markdown, Grip Table)",
