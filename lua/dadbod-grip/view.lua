@@ -1914,37 +1914,96 @@ function M._setup_keymaps(bufnr)
     M.render(bufnr, session.state)
   end, "Restore all hidden columns")
 
-  -- gH: column visibility picker
+  -- gH: multi-select column visibility picker
   map("gH", function()
     local session = M._sessions[bufnr]
     if not session then return end
     if not session.hidden_columns then session.hidden_columns = {} end
-    local items = {}
-    for _, col in ipairs(session.state.columns) do
-      local hidden = session.hidden_columns[col]
-      local prefix = hidden and "[ ] " or "[x] "
-      table.insert(items, prefix .. col)
+
+    local cols = session.state.columns
+    -- Pending is a shadow copy; only written to session on <CR>
+    local pending = {}
+    for k, v in pairs(session.hidden_columns) do pending[k] = v end
+
+    local max_w = 6  -- "[✓] " prefix = 4, plus min width
+    for _, col in ipairs(cols) do
+      if #col + 6 > max_w then max_w = #col + 6 end
     end
-    vim.ui.select(items, { prompt = "Toggle column visibility:" }, function(choice)
-      if not choice then return end
-      local col_name = choice:sub(5)
-      if session.hidden_columns[col_name] then
-        session.hidden_columns[col_name] = nil
-      else
-        -- Check we're not hiding the last visible column
-        local visible = 0
-        for _, col in ipairs(session.state.columns) do
-          if not session.hidden_columns[col] and col ~= col_name then visible = visible + 1 end
-        end
-        if visible == 0 then
-          vim.notify("Cannot hide last visible column", vim.log.levels.INFO)
-          return
-        end
-        session.hidden_columns[col_name] = true
+    local width  = math.min(max_w + 4, vim.o.columns - 4)
+    local height = math.min(#cols + 2, vim.o.lines - 6)
+
+    local pbuf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = pbuf })
+
+    local function render_lines()
+      local lines = {}
+      for _, col in ipairs(cols) do
+        local vis = not pending[col]
+        lines[#lines + 1] = (vis and "  [✓] " or "  [ ] ") .. col
       end
+      vim.api.nvim_set_option_value("modifiable", true, { buf = pbuf })
+      vim.api.nvim_buf_set_lines(pbuf, 0, -1, false, lines)
+      vim.api.nvim_set_option_value("modifiable", false, { buf = pbuf })
+    end
+
+    render_lines()
+
+    local pwin = vim.api.nvim_open_win(pbuf, true, {
+      relative   = "editor",
+      row        = math.floor((vim.o.lines - height) / 2),
+      col        = math.floor((vim.o.columns - width) / 2),
+      width      = width,
+      height     = height,
+      style      = "minimal",
+      border     = "rounded",
+      title      = " Columns  <Space> toggle  <CR> apply  q cancel ",
+      title_pos  = "center",
+      zindex     = 55,
+    })
+    vim.api.nvim_win_set_option(pwin, "cursorline", true)
+    vim.api.nvim_win_set_cursor(pwin, { 1, 0 })
+
+    local function close_picker()
+      if vim.api.nvim_win_is_valid(pwin) then vim.api.nvim_win_close(pwin, true) end
+    end
+
+    local function apply()
+      -- Guard: must keep at least one visible column
+      local visible_count = 0
+      for _, col in ipairs(cols) do
+        if not pending[col] then visible_count = visible_count + 1 end
+      end
+      if visible_count == 0 then
+        vim.notify("Cannot hide all columns", vim.log.levels.INFO)
+        return
+      end
+      session.hidden_columns = pending
+      close_picker()
       M.render(bufnr, session.state)
-    end)
-  end, "Toggle column visibility")
+    end
+
+    local bopts = { buffer = pbuf, nowait = true }
+    vim.keymap.set("n", "<Space>", function()
+      local lnum = vim.api.nvim_win_get_cursor(pwin)[1]
+      local col = cols[lnum]
+      if not col then return end
+      if pending[col] then
+        pending[col] = nil
+      else
+        pending[col] = true
+      end
+      render_lines()
+      vim.api.nvim_win_set_cursor(pwin, { lnum, 0 })
+    end, bopts)
+    vim.keymap.set("n", "<CR>", apply, bopts)
+    vim.keymap.set("n", "q",    close_picker, bopts)
+    vim.keymap.set("n", "<Esc>", close_picker, bopts)
+
+    vim.api.nvim_create_autocmd("WinLeave", {
+      buffer = pbuf, once = true,
+      callback = function() close_picker() end,
+    })
+  end, "Toggle column visibility (multi-select)")
 
   -- $: last column of current row
   map("$", function()
@@ -2853,7 +2912,9 @@ function M._setup_keymaps(bufnr)
   -- gb: schema browser sidebar (toggle/focus)
   map("gb", function()
     local schema = require("dadbod-grip.schema")
-    local s_url = M._sessions[bufnr] and M._sessions[bufnr].url
+    local s = M._sessions[bufnr]
+    -- For file-as-table sessions, pass the file path so sidebar shows column schema
+    local s_url = s and (s.file_path or s.url)
     schema.toggle(s_url)
   end, "Schema browser")
 

@@ -44,6 +44,18 @@ local function ensure_global_grip_dir()
   end
 end
 
+--- Detect if a URL or path points to a file DuckDB can query directly.
+local function is_file_url(url)
+  if not url or url == "" then return false end
+  if url:match("^https?://") then return true end
+  local lower = url:lower():gsub("[?#].*$", "")
+  for _, ext in ipairs({ ".parquet", ".csv", ".tsv", ".json", ".ndjson", ".jsonl",
+                          ".xlsx", ".orc", ".arrow", ".ipc" }) do
+    if lower:sub(-#ext) == ext then return true end
+  end
+  return false
+end
+
 --- Read connections from a JSON file.
 local function read_json_connections(path, source)
   if vim.fn.filereadable(path) == 0 then return {} end
@@ -53,7 +65,8 @@ local function read_json_connections(path, source)
   local result = {}
   for _, entry in ipairs(data) do
     if type(entry) == "table" and entry.name and entry.url then
-      table.insert(result, { name = entry.name, url = entry.url, source = source or "file" })
+      table.insert(result, { name = entry.name, url = entry.url,
+                             type = entry.type, source = source or "file" })
     end
   end
   return result
@@ -78,7 +91,9 @@ local function write_file_connections(conns)
   ensure_grip_dir()
   local data = {}
   for _, c in ipairs(conns) do
-    table.insert(data, { name = c.name, url = c.url })
+    local entry = { name = c.name, url = c.url }
+    if c.type then entry.type = c.type end
+    table.insert(data, entry)
   end
   local json = vim.fn.json_encode(data)
   vim.fn.writefile({ json }, connections_path())
@@ -147,7 +162,9 @@ function M.list()
     ensure_global_grip_dir()
     local gdata = {}
     for _, gc in ipairs(global_existing) do
-      table.insert(gdata, { name = gc.name, url = gc.url })
+      local gentry = { name = gc.name, url = gc.url }
+      if gc.type then gentry.type = gc.type end
+      table.insert(gdata, gentry)
     end
     vim.fn.writefile({ vim.fn.json_encode(gdata) }, global_connections_path())
   end
@@ -170,7 +187,8 @@ end
 --- Add a connection to .grip/connections.json.
 function M.add(name, url)
   local conns = read_file_connections()
-  table.insert(conns, { name = name, url = url })
+  local conn_type = is_file_url(url) and "file" or nil
+  table.insert(conns, { name = name, url = url, type = conn_type })
   write_file_connections(conns)
 end
 
@@ -186,27 +204,57 @@ function M.remove(name)
   write_file_connections(filtered)
 end
 
---- Switch active connection. Sets vim.g.db and opens the full workspace.
+--- Switch active connection. Routes file connections through grip.open(),
+--- DB connections through vim.g.db + workspace open.
 --- Auto-saves to .grip/connections.json if not already persisted.
-function M.switch(url, name)
-  vim.g.db = url
-
-  -- Auto-persist if not already in file connections
+function M.switch(url, name, conn_type)
+  -- Resolve type: param > stored connections > auto-detect
   local file_conns = read_file_connections()
+  local resolved_type = conn_type
+  if not resolved_type then
+    for _, c in ipairs(file_conns) do
+      if c.url == url and c.type then
+        resolved_type = c.type
+        break
+      end
+    end
+  end
+  if not resolved_type and is_file_url(url) then
+    resolved_type = "file"
+  end
+
+  -- Auto-persist if not already saved
   local already_saved = false
   for _, c in ipairs(file_conns) do
-    if c.url == url then
-      already_saved = true
-      break
-    end
+    if c.url == url then already_saved = true; break end
   end
   if not already_saved and name and name ~= "" then
     M.add(name, url)
   end
 
+  if resolved_type == "file" then
+    vim.notify("Grip: opening " .. (name or url), vim.log.levels.INFO)
+    -- Capture current window so the grid replaces it (e.g. dashboard)
+    local cur_win = vim.api.nvim_get_current_win()
+    vim.schedule(function()
+      require("dadbod-grip").open(url, nil, { reuse_win = cur_win })
+      -- Open sidebar with file schema after the grid is placed
+      vim.schedule(function()
+        local schema = require("dadbod-grip.schema")
+        if not schema.is_open() then
+          schema.toggle(url)
+        else
+          schema.refresh(url)
+        end
+      end)
+    end)
+    return
+  end
+
+  -- Regular DB connection: set vim.g.db and open full workspace
+  vim.g.db = url
   vim.notify("Grip: connected to " .. (name or url), vim.log.levels.INFO)
 
-  -- Open the full workspace: schema sidebar + query pad
   vim.schedule(function()
     local schema = require("dadbod-grip.schema")
     if not schema.is_open() then
@@ -288,14 +336,16 @@ function M.pick()
     items = picker_items,
     display = function(c)
       if c._new then return c.name end
+      local is_file = c.type == "file" or (not c.type and is_file_url(c.url))
+      local tag = is_file and "[file] " or "[db]   "
       local pad = string.rep(" ", max_name - vim.fn.strdisplaywidth(c.name))
-      return c.name .. pad .. "  " .. c.url
+      return tag .. c.name .. pad .. "  " .. c.url
     end,
     on_select = function(c)
       if c._new then
         prompt_new_connection()
       else
-        M.switch(c.url, c.name)
+        M.switch(c.url, c.name, c.type)
       end
     end,
     on_delete = function(c, refresh_fn)

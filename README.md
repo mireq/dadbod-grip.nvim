@@ -35,6 +35,10 @@ Edit data like a GUI. Navigate like Vim. Never leave your editor.
 | **Schema browser** `gb` sidebar, PK/FK markers | **Data diff** `gD` compare tables by primary key | **Multi-DB** PostgreSQL · SQLite · MySQL · DuckDB |
 | **Saved queries** project-local `.grip/queries/` | **Export** CSV · TSV · JSON · SQL · Markdown · Table | **Connection profiles** global auto-persist |
 
+## Demo
+
+[Data science interview question in under 5 minutes](docs/demo-taxi.md) — 3.3M NYC taxi rows, no download, answered with ~35 keystrokes.
+
 ## Quickstart
 
 ```lua

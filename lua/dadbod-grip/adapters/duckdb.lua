@@ -7,6 +7,12 @@ local db_util = require("dadbod-grip.db")
 local M = {}
 
 local DEFAULT_TIMEOUT = 10000
+local HTTP_TIMEOUT    = 60000
+
+--- Track whether httpfs has been loaded in this Neovim session.
+--- INSTALL is only needed once; after that LOAD suffices.
+--- Reset to nil if an httpfs error occurs so the next query retries INSTALL.
+local _httpfs_state = nil  -- nil = unknown, "installed" = ready, "failed" = unavailable
 
 --- Extract file path from dadbod's duckdb: URL format.
 --- "duckdb:path/to/db.duckdb"    -> "path/to/db.duckdb"
@@ -29,14 +35,19 @@ local function extract_path(url)
   return path
 end
 
-local HTTP_TIMEOUT = 30000
-
 local function duckdb(db_path, sql_str, timeout_ms)
-  -- Auto-load httpfs extension for HTTP URLs
   local effective_sql = sql_str
   local effective_timeout = timeout_ms or DEFAULT_TIMEOUT
+
   if sql_str:find("https?://") then
-    effective_sql = "INSTALL httpfs; LOAD httpfs;\n" .. sql_str
+    -- Only run INSTALL on first use; LOAD on every subsequent query.
+    local prefix
+    if _httpfs_state == "installed" then
+      prefix = "LOAD httpfs;\n"
+    else
+      prefix = "INSTALL httpfs; LOAD httpfs;\n"
+    end
+    effective_sql = prefix .. sql_str
     effective_timeout = math.max(effective_timeout, HTTP_TIMEOUT)
   end
 
@@ -51,7 +62,18 @@ local function duckdb(db_path, sql_str, timeout_ms)
     args,
     { text = true, timeout = effective_timeout }
   ):wait()
-  return result.stdout or "", result.stderr or "", result.code
+
+  local stderr = result.stderr or ""
+  -- Track httpfs install state from stderr output
+  if sql_str:find("https?://") then
+    if stderr:find("httpfs") and (stderr:find("[Ee]rror") or stderr:find("[Ff]ail")) then
+      _httpfs_state = nil  -- Reset so next attempt retries INSTALL
+    else
+      _httpfs_state = "installed"
+    end
+  end
+
+  return result.stdout or "", stderr, result.code
 end
 
 --- Run DML without CSV mode (to get change count output).
@@ -81,6 +103,14 @@ function M.query(sql_str, url)
   local stdout, stderr, code = duckdb(db_path, sql_str)
   if code ~= 0 then
     local msg = stderr ~= "" and stderr or ("duckdb exited with code " .. code)
+    -- Surface actionable hint for httpfs / remote URL failures
+    if sql_str:find("https?://") then
+      if msg:find("[Hh]ttpfs") or msg:find("[Ee]xtension") then
+        msg = msg .. "\nHint: run `duckdb -c 'INSTALL httpfs'` once to install the extension."
+      elseif msg:find("[Uu]nable to connect") or msg:find("[Hh]TTP [Ee]rror") then
+        msg = msg .. "\nHint: check the URL is reachable and the file exists."
+      end
+    end
     return nil, msg
   end
 

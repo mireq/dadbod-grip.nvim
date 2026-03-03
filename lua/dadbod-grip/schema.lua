@@ -56,12 +56,34 @@ local function abbrev_type(dtype)
   return dtype
 end
 
+-- File extensions that DuckDB can query directly (mirrors init.lua).
+local FILE_EXTENSIONS = { ".parquet", ".csv", ".tsv", ".json", ".ndjson", ".jsonl", ".xlsx", ".orc", ".arrow", ".ipc" }
+
+--- Returns true when the URL is a file path or remote file (not a DB connection).
+local function is_file_url(url)
+  if not url then return false end
+  if url:match("^https?://") then
+    local path = url:gsub("[?#].*$", ""):lower()
+    for _, ext in ipairs(FILE_EXTENSIONS) do
+      if path:sub(-#ext) == ext then return true end
+    end
+  end
+  if url:match("^/") or url:match("^~/") or url:match("^%.%.?/") then
+    local lower = url:lower()
+    for _, ext in ipairs(FILE_EXTENSIONS) do
+      if lower:sub(-#ext) == ext then return true end
+    end
+  end
+  return false
+end
+
 --- Get or create state for a URL.
 local function get_state(url)
   if not _states[url] then
     _states[url] = {
       url = url,
       items = nil,       -- { {name, type}, ... } — nil = not fetched
+      file_cols = nil,   -- for file-as-table: { {column_name, data_type}, ... }
       expanded = {},      -- set of expanded table names
       col_cache = {},     -- table_name → column_info[]
       pk_cache = {},      -- table_name → set
@@ -73,7 +95,7 @@ local function get_state(url)
   return _states[url]
 end
 
---- Fetch table list for a state.
+--- Fetch table list for a persistent DB state.
 local function fetch_tables(state)
   local tables, err = db.list_tables(state.url)
   if not tables then
@@ -81,6 +103,31 @@ local function fetch_tables(state)
     return
   end
   state.items = tables
+end
+
+--- Fetch column schema for a file-as-table URL (Parquet, CSV, remote file).
+--- Uses DuckDB's DESCRIBE to get column names and types without needing a DB.
+local function fetch_file_schema(state)
+  local file_url = state.url
+  local safe_url = file_url:gsub("'", "''")
+  local sql = string.format("DESCRIBE SELECT * FROM '%s' LIMIT 0", safe_url)
+  local result, err = db.query(sql, "duckdb::memory:")
+  if not result then
+    vim.notify("Grip: could not read file schema: " .. (err or "unknown"), vim.log.levels.WARN)
+    state.file_cols = {}
+    state.items = {}
+    return
+  end
+  local cols = {}
+  for _, row in ipairs(result.rows or {}) do
+    local col_name  = type(row) == "table" and (row.column_name  or row[1]) or row
+    local col_type  = type(row) == "table" and (row.column_type  or row[2]) or ""
+    if col_name and col_name ~= "" then
+      table.insert(cols, { column_name = col_name, data_type = col_type })
+    end
+  end
+  state.file_cols = cols
+  state.items = {}  -- Mark as fetched (empty = no DB tables, which is correct)
 end
 
 --- Fetch column info for a table (lazy, cached).
@@ -104,6 +151,32 @@ end
 --- Build flat node list from state.
 local function build_nodes(state)
   local nodes = {}
+
+  -- File-as-table mode: show columns of the file directly, no DB schema needed
+  if state.file_cols then
+    local fname = state.url:match("[^/\\]+$") or state.url
+    local expanded = state.expanded["__file__"] ~= false  -- default expanded
+    table.insert(nodes, { kind = "header", text = "File" })
+    table.insert(nodes, {
+      kind = "table", name = fname, expanded = expanded,
+      is_file = true, file_key = "__file__",
+    })
+    if expanded then
+      for _, col in ipairs(state.file_cols) do
+        table.insert(nodes, {
+          kind = "column",
+          name = col.column_name,
+          dtype = abbrev_type(col.data_type),
+          pk = false, fk = false,
+          table_name = "__file__",
+          is_file = true,
+        })
+      end
+    end
+    state.nodes = nodes
+    return nodes
+  end
+
   if not state.items then return nodes end
 
   local tables = {}
@@ -191,10 +264,16 @@ local function render(state)
   local lines = {}
   local highlights = {}
 
-  -- Connection name in title
-  local connections = require("dadbod-grip.connections")
-  local current = connections.current()
-  local title = current and current.name or state.url:match("^%w+://[^/]*/?([^?]*)") or state.url
+  -- Title: file name for file-as-table, connection name for DB connections
+  local title
+  if state.file_cols ~= nil then
+    title = state.url:match("[^/\\]+$") or state.url
+    if #title > 34 then title = "…" .. title:sub(-33) end
+  else
+    local connections = require("dadbod-grip.connections")
+    local current = connections.current()
+    title = current and current.name or state.url:match("^%w+://[^/]*/?([^?]*)") or state.url
+  end
   table.insert(lines, " " .. title)
   table.insert(highlights, { line = 0, col = 0, end_col = #lines[1], hl = "GripBorder" })
   table.insert(lines, "")
@@ -211,7 +290,10 @@ local function render(state)
       table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripHeader" })
     elseif node.kind == "table" then
       local arrow = node.expanded and " ▼ " or " ▶ "
-      table.insert(lines, arrow .. node.name)
+      local max_name = SIDEBAR_MAX_WIDTH - 3  -- subtract arrow chars
+      local display_name = #node.name > max_name
+          and ("…" .. node.name:sub(-(max_name - 1))) or node.name
+      table.insert(lines, arrow .. display_name)
       -- No special hl for table names — keep it clean
     elseif node.kind == "column" then
       local prefix
@@ -374,7 +456,21 @@ local function setup_keymaps(url)
   map("<CR>", function()
     local node = node_at_cursor(state)
     if not node then return end
-    if node.kind == "table" then
+    if node.is_file then
+      if node.kind == "table" then
+        -- File table node: focus the grid (or re-open it)
+        local target_win = find_right_win()
+        if target_win then
+          vim.api.nvim_set_current_win(target_win)
+        else
+          require("dadbod-grip").open(url, nil, {})
+        end
+      else
+        -- File column node: collapse/expand parent
+        state.expanded["__file__"] = not state.expanded["__file__"]
+        render(state)
+      end
+    elseif node.kind == "table" then
       open_table(node.name, url)
     elseif node.kind == "column" and node.table_name then
       open_table(node.table_name, url)
@@ -385,6 +481,7 @@ local function setup_keymaps(url)
   map("<S-CR>", function()
     local node = node_at_cursor(state)
     if not node then return end
+    if node.is_file then return end  -- file nodes have no separate split action
     if node.kind == "table" then
       open_table_split(node.name, url)
     elseif node.kind == "column" and node.table_name then
@@ -395,10 +492,10 @@ local function setup_keymaps(url)
   -- Expand
   map("l", function()
     local node = node_at_cursor(state)
-    if node and node.kind == "table" and not node.expanded then
-      state.expanded[node.name] = true
-      render(state)
-    end
+    if not node or node.kind ~= "table" or node.expanded then return end
+    local key = node.file_key or node.name
+    state.expanded[key] = true
+    render(state)
   end)
   map("zo", function()
     local node = node_at_cursor(state)
@@ -411,20 +508,23 @@ local function setup_keymaps(url)
   -- Collapse
   map("h", function()
     local node = node_at_cursor(state)
-    if node and node.kind == "table" and node.expanded then
-      state.expanded[node.name] = false
+    if not node then return end
+    if node.kind == "table" and node.expanded then
+      local key = node.file_key or node.name
+      state.expanded[key] = false
       render(state)
-    elseif node and node.kind == "column" and node.table_name then
-      state.expanded[node.table_name] = false
+    elseif node.kind == "column" and node.table_name then
+      local key = node.file_key and "__file__" or node.table_name
+      state.expanded[key] = false
       render(state)
     end
   end)
   map("zc", function()
     local node = node_at_cursor(state)
-    if node and node.kind == "table" then
-      state.expanded[node.name] = false
-      render(state)
-    end
+    if not node or node.kind ~= "table" then return end
+    local key = node.file_key or node.name
+    state.expanded[key] = false
+    render(state)
   end)
 
   -- Expand all
@@ -502,6 +602,18 @@ local function setup_keymaps(url)
   map("go", function()
     local node = node_at_cursor(state)
     if not node then return end
+
+    -- File nodes: focus grid or re-open the file (no ORDER BY for file-as-table)
+    if node.is_file then
+      local target_win = find_right_win()
+      if target_win then
+        vim.api.nvim_set_current_win(target_win)
+      else
+        require("dadbod-grip").open(url, nil, {})
+      end
+      return
+    end
+
     local tbl = (node.kind == "table" and node.name)
              or (node.kind == "column" and node.table_name)
     if not tbl then return end
@@ -750,9 +862,13 @@ function M.toggle(url)
   vim.wo[_sidebar_winid].winfixwidth = true
   vim.wo[_sidebar_winid].wrap = false
 
-  -- Fetch tables if not cached
+  -- Fetch schema if not cached
   if not state.items then
-    fetch_tables(state)
+    if is_file_url(url) then
+      fetch_file_schema(state)
+    else
+      fetch_tables(state)
+    end
   end
 
   render(state)

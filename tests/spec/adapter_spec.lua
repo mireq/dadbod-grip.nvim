@@ -337,7 +337,7 @@ test("duckdb query: http URL also triggers httpfs", function()
       duckdb.query("SELECT * FROM 'http://example.com/data.csv'", "duckdb::memory:")
     end)
     local sql_arg = args[#args]
-    contains(sql_arg, "INSTALL httpfs", "http should also trigger httpfs")
+    contains(sql_arg, "httpfs", "http should also trigger httpfs")
   end)
 end)
 

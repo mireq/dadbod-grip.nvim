@@ -664,6 +664,8 @@ function M.open(arg, url, opts)
   -- Store query spec and run initial count for pagination
   local session = view._sessions[bufnr]
   if session then
+    -- For file-as-table, store the file path so the schema sidebar can show columns
+    if file_path then session.file_path = file_path end
     session.query_spec = spec
     -- Run count query for pagination
     local count_sql = query.build_count_sql(spec)
