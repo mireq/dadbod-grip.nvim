@@ -1293,7 +1293,7 @@ function M.do_export(bufnr)
   end
 
   local ext = fmt == "sql" and "sql" or fmt
-  local default_path = vim.fn.expand("%:p:h") .. "/grip_export." .. ext
+  local default_path = vim.fn.getcwd() .. "/grip_export." .. ext
   local ok_path, path = pcall(vim.fn.input, {
     prompt = "Save to: ",
     default = default_path,
@@ -3270,7 +3270,8 @@ function M._setup_keymaps(bufnr)
 
     local value
     if op ~= "NULL" and op ~= "NOT NULL" then
-      local ok2, val = pcall(vim.fn.input, { prompt = "Value: ", cancelreturn = CANCEL })
+      local value_prompt = op == "LIKE" and "Value (use % wildcards, e.g. %text%): " or "Value: "
+      local ok2, val = pcall(vim.fn.input, { prompt = value_prompt, cancelreturn = CANCEL })
       if not ok2 or val == CANCEL then return end
       value = val
     end

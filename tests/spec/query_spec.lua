@@ -201,11 +201,14 @@ test("filter_summary: shows clause for single filter", function()
   eq(query.filter_summary(spec2), "filter: age > 20")
 end)
 
-test("filter_summary: shows count for multiple filters", function()
+test("filter_summary: shows all clauses for multiple filters", function()
   local spec = query.new_table("users", 100)
   local spec2 = query.add_filter(spec, "a = 1")
   local spec3 = query.add_filter(spec2, "b = 2")
-  eq(query.filter_summary(spec3), "2 filters")
+  local summary = query.filter_summary(spec3)
+  assert(summary:find("a = 1", 1, true), "expected 'a = 1' in: " .. summary)
+  assert(summary:find("b = 2", 1, true), "expected 'b = 2' in: " .. summary)
+  assert(summary:find("filters:", 1, true), "expected 'filters:' prefix in: " .. summary)
 end)
 
 -- ── pagination modifiers ────────────────────────────────────────────────────

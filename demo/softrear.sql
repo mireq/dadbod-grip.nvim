@@ -819,3 +819,41 @@ INSERT INTO quality_certifications VALUES
 (13, 'RECYCLED_ECO_2PLY',      'Greg', 6, false, NULL),
 (14, 'HOTEL_AMENITY_2PLY',     'Greg', 8, false, NULL),
 (15, 'PREMIUM_QUILTED_3PLY',   'Greg', 8, false, NULL);
+
+
+-- ─────────────────────────────────────────────────────────────
+-- JSON COLUMNS (for testing JSON K/i cell view)
+-- DuckDB native JSON type. Three tables get JSON:
+-- rolls (product attributes), people_on_to_us (threat profiles),
+-- internal_investigations (case metadata).
+-- ─────────────────────────────────────────────────────────────
+
+ALTER TABLE rolls ADD COLUMN attributes JSON;
+ALTER TABLE people_on_to_us ADD COLUMN threat_profile JSON;
+ALTER TABLE internal_investigations ADD COLUMN case_metadata JSON;
+
+-- rolls.attributes — product specification objects
+UPDATE rolls SET attributes = '{"color":"beige","material":"recycled_fiber","weight_kg":0.8,"ply_count":1,"notes":"flagship budget SKU"}'::JSON WHERE sku = 'ULTRA_BUDGET_XTRM';
+UPDATE rolls SET attributes = '{"color":"white","material":"virgin_pulp","weight_kg":1.6,"embossing":"owl_pattern","fragrance":null}'::JSON WHERE sku = 'CLOUD_TOUCH_4PLY';
+UPDATE rolls SET attributes = '{"color":"off_white","material":"reinforced_cellulose","weight_kg":2.1,"tensile_class":"industrial","safety_rating":{"plumbing":"not_recommended","industrial":"approved"}}'::JSON WHERE sku = 'TITANIUM_TRIPLE_PLY';
+UPDATE rolls SET attributes = '{"color":"natural","material":"bamboo_inspired","weight_kg":1.2,"bamboo_content_pct":0,"certifications":["eco_friendly_label","green_verified"]}'::JSON WHERE sku = 'BAMBOO_INFUSED_3PLY';
+UPDATE rolls SET attributes = '{"color":"matte_black","material":"premium_cellulose","weight_kg":1.4,"limited_edition":true,"origin_story":"executive_dream"}'::JSON WHERE sku = 'MIDNIGHT_MATTE_BLACK_3PLY';
+UPDATE rolls SET attributes = '{"color":"lavender","material":"scented_cellulose","weight_kg":1.3,"fragrance":"lavender_synthetic","allergen_warning":true,"recall_risk":"high"}'::JSON WHERE sku = 'LAVENDER_INFUSED_3PLY';
+UPDATE rolls SET attributes = '{"color":"white","material":"ultra_premium_cellulose","weight_kg":1.8,"cashmere_content_pct":0,"tier":"flagship","price_justification":"vibes"}'::JSON WHERE sku = 'ULTRA_SOFT_CASHMERE_4PLY';
+UPDATE rolls SET attributes = '{"color":"grey","material":"industrial_pulp","weight_kg":3.2,"load_rating_kg":47,"warning":"not_for_residential_plumbing"}'::JSON WHERE sku = 'MEGA_BULK_INDUSTRIAL_1PLY';
+UPDATE rolls SET attributes = '{"color":"multicolor","material":"premium_cellulose","weight_kg":1.4,"confetti_elements":true,"adhesion_risk":"high","recall_reason":"confetti_bonding"}'::JSON WHERE sku = 'CONFETTI_PARTY_2PLY';
+UPDATE rolls SET attributes = '{"color":"white","material":"aloe_infused_cellulose","weight_kg":1.3,"active_ingredient":"aloe_vera","concentration_ppm":12,"dermatologist_tested":false}'::JSON WHERE sku = 'ALOE_FRESH_2PLY';
+
+-- people_on_to_us.threat_profile — nested threat intelligence objects
+UPDATE people_on_to_us SET threat_profile = '{"risk_level":"critical","platforms":["YouTube","encrypted_channel"],"assets_compromised":["formula_2019","supplier_contracts","cartel_photos"],"last_activity":{"date":"2024-02-28","type":"video_upload","title":"The Formula They Dont Want You To See"}}'::JSON WHERE id = 1;
+UPDATE people_on_to_us SET threat_profile = '{"risk_level":"neutralized","platforms":["Academia","LinkedIn"],"assets_compromised":["formula_reverse_engineered"],"acquisition_status":{"acquired":true,"date":"2023-Q2","clearance_level":"R_D_restricted"}}'::JSON WHERE id = 2;
+UPDATE people_on_to_us SET threat_profile = '{"risk_level":"high","platforms":["Twitter","backup_accounts"],"followers":40000,"knows":{"formula_changed":true,"supplier_info":"partial"},"current_status":"monitoring"}'::JSON WHERE id = 3;
+UPDATE people_on_to_us SET threat_profile = '{"risk_level":"critical","platforms":["Reddit"],"assets_compromised":["complete_formula_2019"],"post_archive_exists":true,"estimated_copies":"unknown","notes":"sleeper — will resurface"}'::JSON WHERE id = 4;
+UPDATE people_on_to_us SET threat_profile = '{"risk_level":"medium","platforms":["Reddit"],"subscribers":12000,"knows":{"shanghai_supplier":true,"bamboo_don_specifically":false},"current_status":"inactive_3_months"}'::JSON WHERE id = 5;
+
+-- internal_investigations.case_metadata — case intelligence with nested structures
+UPDATE internal_investigations SET case_metadata = '{"priority":"high","watchers":3,"evidence_files":["spreadsheet_v7.xlsx","comparison_photos.zip"],"risk_assessment":{"exposure_risk":8,"resolution_probability":0.3},"tags":["formula","twitter"]}'::JSON WHERE id = 1;
+UPDATE internal_investigations SET case_metadata = '{"priority":"critical","watchers":5,"evidence_files":["full_recipe.txt","supplier_contracts.pdf","photos.zip"],"risk_assessment":{"exposure_risk":10,"resolution_probability":0.05},"tags":["formula","cartel","supplier"]}'::JSON WHERE id = 2;
+UPDATE internal_investigations SET case_metadata = '{"priority":"resolved","watchers":0,"outcome":"acquired","acquisition_details":{"division":"R_D","clearance":"restricted","nda_signed":true},"tags":["formula","academic"]}'::JSON WHERE id = 3;
+UPDATE internal_investigations SET case_metadata = '{"priority":"high","watchers":2,"platform_metrics":{"subscribers":12000,"posts_last_90_days":0},"risk_assessment":{"exposure_risk":7,"dormancy":"suspicious"},"tags":["reddit","moderator"]}'::JSON WHERE id = 4;
+UPDATE internal_investigations SET case_metadata = '{"priority":"medium","watchers":1,"platform_metrics":{"subscribers":47300,"video_views_total":2100000},"notable_content":["ply_count_video","formula_comparison"],"tags":["youtube","viral"]}'::JSON WHERE id = 5;

@@ -186,7 +186,13 @@ function M.filter_summary(spec)
   if #spec.filters == 1 then
     return "filter: " .. spec.filters[1].clause
   end
-  return #spec.filters .. " filters"
+  -- Show all clauses, each truncated at 22 chars, joined with middot
+  local parts = {}
+  for _, f in ipairs(spec.filters) do
+    local c = f.clause
+    table.insert(parts, #c > 22 and c:sub(1, 19) .. "..." or c)
+  end
+  return "filters: " .. table.concat(parts, "  \xC2\xB7  ")
 end
 
 --- Replace all filters with a single clause (for loading presets).
