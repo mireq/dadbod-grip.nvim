@@ -9,6 +9,18 @@ local M = {}
 local NULL_SENTINEL = "\0NULL\0"
 M.NULL_SENTINEL = NULL_SENTINEL  -- exposed so sql.lua / view.lua can check
 
+-- M.from_csv_raw(raw) → value ready for sql.build_*() functions
+-- Normalizes a raw CSV cell value for use in undo SQL generation.
+-- All adapters (PostgreSQL, MySQL, SQLite, DuckDB) represent NULL as ""
+-- in their CSV output (the "psql --csv quirk" documented throughout this file).
+-- Returns NULL_SENTINEL for nil or "" so build_insert/build_update emit SQL NULL.
+function M.from_csv_raw(raw)
+  if raw == nil or raw == "" then
+    return NULL_SENTINEL
+  end
+  return raw
+end
+
 -- State shape (plain table, no methods):
 -- {
 --   rows       = {},        -- original rows from query (list of string lists)

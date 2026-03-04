@@ -236,17 +236,17 @@ NAVIGATION ~
   h / l           Move cursor within row
   w / b           Next / previous column
   Tab / S-Tab     Next / previous column
+  e               End of cell, then advance to next column
   gg              First data row
   G               Last data row
   0 / ^           First column (0 unpins if columns are pinned)
   $               Last column
   { / }           Previous / next modified row
-  <CR>            Expand cell value in popup
   K               Row view (vertical transpose of current row)
 
 EDITING ~
                                                             *grip-editing*
-  e               Edit cell under cursor (opens float editor)
+  i / <CR>        Edit cell under cursor (opens float editor)
   x               Set cell to NULL
   p               Paste clipboard value into cell
   P               Paste multi-line clipboard into consecutive rows
@@ -305,6 +305,7 @@ INSPECTION ~
 
 TAB VIEWS ~
                                                         *grip-tab-views*
+  1               Table picker (fuzzy finder)
   2               Records (data rows, default view)
   3               Query history for current table
   4               Column statistics (count, nulls, distinct, min/max)
@@ -319,13 +320,14 @@ COLUMN VISIBILITY ~
   -               Hide column under cursor
   g-              Restore all hidden columns
   gH              Column visibility picker (toggle individual columns)
-  =               Expand column to full content width; press again to reset
+  =               Cycle column width: compact → expanded (full, uncapped) → reset
 
 YANKING ~
                                                            *grip-yanking*
   y               Yank cell value to system clipboard
   Y               Yank row as CSV
   gY              Yank entire table as CSV
+  gy              Yank table as Markdown pipe table
 
 SCHEMA AND WORKFLOW ~
                                                           *grip-workflow*
@@ -356,12 +358,12 @@ Grip uses a staging model for edits. Changes are staged in memory and
 color-coded in the grid before being applied to the database.
 
 Color coding:
-  Blue ............. Modified cell (staged change)
+  Violet ........... Modified cell (staged change)
   Red .............. Row marked for deletion
   Green ............ Newly inserted row
 
 Workflow:
-  1. Edit cells with `e`, set NULL with `x`, paste with `p`
+  1. Edit cells with `i` or `<CR>`, set NULL with `x`, paste with `p`
   2. Insert rows with `o`, mark deletions with `d`
   3. Preview staged SQL with `gs` or live preview with `gl`
   4. Apply all changes with `a` (wraps in BEGIN/COMMIT transaction)

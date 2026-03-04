@@ -285,7 +285,7 @@ local function do_apply(bufnr, url)
   for _, del in ipairs(deletes) do
     local row_values = {}
     for _, col in ipairs(st.columns) do
-      row_values[col] = st.rows[del.row_idx][col_idx[col]]
+      row_values[col] = data.from_csv_raw(st.rows[del.row_idx][col_idx[col]])
     end
     table.insert(reverse_stmts, sql.build_insert(st.table_name, row_values, st.columns))
   end
@@ -294,7 +294,7 @@ local function do_apply(bufnr, url)
   for _, upd in ipairs(updates) do
     local orig_values = {}
     for col, _ in pairs(upd.changes) do
-      orig_values[col] = st.rows[upd.row_idx][col_idx[col]]
+      orig_values[col] = data.from_csv_raw(st.rows[upd.row_idx][col_idx[col]])
     end
     table.insert(reverse_stmts, sql.build_update(st.table_name, upd.pk_values, orig_values))
   end
@@ -426,6 +426,8 @@ local function do_edit(bufnr, cell, url)
   end
 
   local prompt = (session.state.table_name or "row") .. "." .. cell.col_name
+  local edited_row_idx = cell.row_idx
+  local edited_col    = cell.col_name
   editor.open(prompt, cell.value, function(new_val)
     if new_val == nil then return end  -- cancelled
 
@@ -434,6 +436,34 @@ local function do_edit(bufnr, cell, url)
 
     local new_state = data.add_change(session.state, cell.row_idx, cell.col_name, actual_val)
     view.apply_edit(bufnr, new_state)
+
+    -- After render, advance cursor to next row at the same column (spreadsheet-style).
+    -- vim.schedule fires after render's synchronous cursor-restore AND editor.lua's
+    -- restore_caller schedule, so we set the definitive final cursor position here.
+    vim.schedule(function()
+      local s = view._sessions[bufnr]
+      if not s or not s._render then return end
+      local r = s._render
+      local win = vim.fn.bufwinid(bufnr)
+      if win == -1 then return end
+      local ds = r.data_start or 4
+      local ordered = r.ordered
+      if not ordered or #ordered == 0 then return end
+      -- Find the order-index of the edited row in the new render
+      local edit_order
+      for i, ri in ipairs(ordered) do
+        if ri == edited_row_idx then edit_order = i; break end
+      end
+      if not edit_order then return end
+      -- Advance one row (stay on last if already there)
+      local next_order = math.min(edit_order + 1, #ordered)
+      local next_line  = ds + next_order - 1
+      -- Use the exact column start byte from the new render (avoids width-shift "left one" bug)
+      local bp     = r.byte_positions and r.byte_positions[next_order]
+      local col_bp = bp and bp[edited_col]
+      local byte_col = col_bp and col_bp.start or vim.api.nvim_win_get_cursor(win)[2]
+      pcall(vim.api.nvim_win_set_cursor, win, { next_line, byte_col })
+    end)
   end)
 end
 
@@ -803,6 +833,12 @@ function M.open(arg, url, opts)
   local view_opts = vim.tbl_extend("force", { max_col_width = OPTS.max_col_width, elapsed_ms = elapsed_ms }, opts or {})
   local bufnr = view.open(state, conn, query_sql, view_opts)
 
+  -- Auto-sync query pad with the current grid query (passive background update).
+  -- If the pad buffer exists (even if hidden), it reflects the latest opened query.
+  vim.schedule(function()
+    require("dadbod-grip.query_pad").sync_query(query_sql)
+  end)
+
   -- Store query spec and run initial count for pagination
   local session = view._sessions[bufnr]
   if session then
@@ -1037,6 +1073,279 @@ function M.open_smart()
   end)
 end
 
+-- ── welcome screen ────────────────────────────────────────────────────────
+--- Open the Chonk welcome screen when :Grip is invoked with no arguments.
+--- Creates a grip://welcome buffer, shows logo + Chonk mascot + feature hints.
+function M.open_welcome()
+  -- Find existing welcome buffer
+  local welcome_buf = nil
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_valid(b)
+        and vim.api.nvim_buf_get_name(b) == "grip://welcome" then
+      welcome_buf = b
+      break
+    end
+  end
+
+  -- If already visible in any window, just focus it — reuse, don't replace
+  if welcome_buf then
+    for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      if vim.api.nvim_win_get_buf(winid) == welcome_buf then
+        vim.api.nvim_set_current_win(winid)
+        return
+      end
+    end
+  end
+
+  -- Not visible: if called from the sidebar, find a non-sidebar window to place
+  -- the welcome screen in. Query pad and grid replace their own window.
+  local cur_buf = vim.api.nvim_get_current_buf()
+  local cur_ft  = vim.bo[cur_buf].filetype
+  local is_special = cur_ft == "grip_schema"
+  if is_special then
+    for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      local wbuf  = vim.api.nvim_win_get_buf(winid)
+      local wname = vim.api.nvim_buf_get_name(wbuf)
+      local wft   = vim.bo[wbuf].filetype
+      if wft ~= "grip_schema"
+          and not (wname:match("^grip://") and wname ~= "grip://welcome") then
+        vim.api.nvim_set_current_win(winid)
+        break
+      end
+    end
+  end
+
+  if not welcome_buf then
+    welcome_buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(welcome_buf, "grip://welcome")
+  end
+
+  local ver = "v" .. require("dadbod-grip.version")
+  -- Compact header matching help popup (help guy)
+  local logo = {
+    "",
+    "  ╔═╦═╦═╗",
+    "  ║d║b║g║  dadbod-grip " .. ver,
+    "  ╚═╩═╩═╝",
+    "  DataGrip-grade database editing, inside Neovim.",
+    "",
+    "  ── Get started ────────────────────────────────",
+    "  gc      connect to a database",
+    "  Q       return here from anywhere",
+    "  ?       full keymap reference    ;     ···",
+    "",
+    "  ── Connection strings ──────────────────────────",
+    "  postgresql://user:pass@host:5432/dbname",
+    "  mysql://user:pass@host:3306/dbname",
+    "  sqlite:path/to/file.db      duckdb:path/to/file.duckdb",
+    "  duckdb::memory:             (single-query only — no persistence)",
+    "  /path/to/file.csv           (or .parquet .json .xlsx)",
+    "  https://host/data.parquet   (remote via httpfs)",
+    "",
+    "  ── Navigate ───────────────────────────────────",
+    "  1       table picker         2-9   sidebar tabs (Cols/FK/Idx)",
+    "  go      open table           H/L   page",
+    "  gT      table picker (grid)  gb    schema browser",
+    "  w/b/e   column nav",
+    "",
+    "  ── Edit ───────────────────────────────────────",
+    "  <CR>    edit cell            x     set null",
+    "  gl      live SQL float       u     undo last commit",
+    "  a       apply changes",
+    "  violet = modified · green = inserted · red = deleted",
+    "",
+    "  ── Saved queries · history · filters ──────────",
+    "  q       query pad            gh    query history",
+    "  <C-s>   save query (pad)     gq    load saved query",
+    "  gn      ·NULL· filter        gf    FK drill-down",
+    "",
+    "  ── AI + Schema ────────────────────────────────",
+    "  A       AI SQL (grid)        gA    AI SQL (pad)",
+    "  gD      diff tables          gR    column distributions",
+    "",
+    "  ── Files ──────────────────────────────────────",
+    "  :Grip file.csv               open as table",
+    "  :Grip file.csv --write       edit and write back",
+    "  :Grip file.csv --watch       auto-refresh on timer",
+    "  :Grip https://host/file.csv  remote via httpfs",
+    "",
+    "  ───────────────────────────────────────────────────",
+    "",
+  }
+
+  vim.bo[welcome_buf].modifiable = true
+  vim.api.nvim_buf_set_lines(welcome_buf, 0, -1, false, logo)
+  vim.bo[welcome_buf].modifiable = false
+  vim.bo[welcome_buf].buftype    = "nofile"
+  vim.bo[welcome_buf].modified   = false
+  vim.bo[welcome_buf].filetype   = "grip-welcome"
+
+  -- Syntax highlights for welcome screen — deferred so they survive FileType autocmds
+  local ns_w = vim.api.nvim_create_namespace("grip_welcome")
+  vim.api.nvim_buf_clear_namespace(welcome_buf, ns_w, 0, -1)
+  vim.schedule(function()
+    if not vim.api.nvim_buf_is_valid(welcome_buf) then return end
+    for i, line in ipairs(logo) do
+      local ln  = i - 1
+      local len = #line
+      if line:sub(3, 8) == "──" then
+        -- Section headers and bottom separator
+        vim.api.nvim_buf_add_highlight(welcome_buf, ns_w, "Comment", ln, 0, len)
+      elseif line:sub(3, 5) == "╔" or line:sub(3, 5) == "║" or line:sub(3, 5) == "╚" then
+        -- Logo box lines (╔ ║ ╚)
+        vim.api.nvim_buf_add_highlight(welcome_buf, ns_w, "Special", ln, 0, len)
+        local vs = line:find("dadbod-grip", 1, true)
+        if vs then vim.api.nvim_buf_add_highlight(welcome_buf, ns_w, "Title", ln, vs - 1, len) end
+      elseif line:find("DataGrip-grade", 1, true) then
+        vim.api.nvim_buf_add_highlight(welcome_buf, ns_w, "Comment", ln, 0, len)
+      elseif line:find("= modified", 1, true) then
+        -- Color legend: extmark with high priority so it shows above any syntax highlighting
+        local function hl_phrase(phrase, hl)
+          local s, e = line:find(phrase, 1, true)
+          if s then
+            vim.api.nvim_buf_set_extmark(welcome_buf, ns_w, ln, s - 1, {
+              end_col = e, hl_group = hl, priority = 200,
+            })
+          end
+        end
+        hl_phrase("violet = modified", "GripModified")
+        hl_phrase("green = inserted",  "GripInserted")
+        hl_phrase("red = deleted",     "GripDeleted")
+      elseif line:sub(3, 7) == ":Grip" then
+        -- :Grip command examples
+        local s, e = line:find(":Grip%S*")
+        if s then vim.api.nvim_buf_add_highlight(welcome_buf, ns_w, "Statement", ln, s - 1, e) end
+        s, e = line:find("%-%-%S+")
+        if s then vim.api.nvim_buf_add_highlight(welcome_buf, ns_w, "Identifier", ln, s - 1, e) end
+      elseif line:sub(1, 2) == "  " and line:sub(3, 3) ~= " " and line:sub(3, 3) ~= "" then
+        -- Keymap lines: highlight left key and right key (two-column layout)
+        local _, after = line:match("^  (%S+)()")
+        if after then
+          vim.api.nvim_buf_add_highlight(welcome_buf, ns_w, "Identifier", ln, 2, after - 1)
+        end
+        -- Right-column key: consistently at byte 31 (0-indexed). Guard: line must be long
+        -- enough and that position must be non-space (single-column lines are too short).
+        if #line >= 34 and line:sub(32, 32) ~= " " then
+          local rs, re = line:find("%S+", 32)
+          if rs then
+            vim.api.nvim_buf_add_highlight(welcome_buf, ns_w, "Identifier", ln, rs - 1, re)
+          end
+        end
+      end
+      -- ·NULL· token: highlight wherever it appears, regardless of which branch fired above
+      local ns, ne = line:find("·NULL·", 1, true)
+      if ns then vim.api.nvim_buf_add_highlight(welcome_buf, ns_w, "GripNullStaged", ln, ns - 1, ne) end
+    end
+  end)
+
+  -- Display in current window
+  vim.api.nvim_win_set_buf(0, welcome_buf)
+
+  -- Keymaps
+  local function wmap(key, fn, desc)
+    vim.keymap.set("n", key, fn, { buffer = welcome_buf, silent = true, nowait = true, desc = desc })
+  end
+  local function do_connect()
+    require("dadbod-grip.connections").pick()
+  end
+  local function cur_conn()
+    local c = vim.g.db
+    if type(c) ~= "string" or c == "" then c = os.getenv("DATABASE_URL") end
+    return (c and c ~= "") and c or nil
+  end
+  wmap("q",     function() pcall(vim.api.nvim_buf_delete, welcome_buf, { force = true }) end, "Close welcome")
+  wmap("<Esc>", function() pcall(vim.api.nvim_buf_delete, welcome_buf, { force = true }) end, "Close welcome")
+  wmap("gc",    do_connect, "Connect to database")
+  wmap("gC",    do_connect, "Connect to database")
+  wmap("<C-g>", do_connect, "Connect to database")
+  wmap("<CR>",  do_connect, "Connect to database")
+  wmap("go",    function()
+    local conn = cur_conn()
+    if not conn then do_connect(); return end
+    require("dadbod-grip.picker").pick_table(conn, function(t) M.open(t, conn) end)
+  end, "Open table picker")
+  wmap("gb",    function()
+    require("dadbod-grip.schema").toggle(cur_conn())
+  end, "Schema browser")
+  wmap("?",     function() view.show_help() end, "Full keymap help")
+  wmap("A",     function()
+    require("dadbod-grip.ai").ask(cur_conn())
+  end, "AI SQL assistant")
+
+  -- Dev secret: Chonk at the center of the grip vortex
+  wmap(";", function()
+    local secret = {
+      "",
+      " ∿ ∿ ∿  dadbod-grip vortex  ∿ ∿ ∿",
+      "",
+      "  ·   · · · · · · · · · · ·   ·",
+      "  ·   ╭───────────────────╮   ·",
+      "  ·   │ · · · · · · · · · │   ·",
+      "  ·   │  ╭─────────────╮  │   ·",
+      "  ·   │  │    ▄▄▄▄▄    │  │   ·",
+      "  ·   │  │   ▐█████▌   │  │   ·",
+      "  ·   │  │ ▄█████████▄ │  │   ·",
+      "  ·   │  │▐█  ◦   ◦  █▌│  │   ·",
+      "  ·   │  │▐█  ─────  █▌│  │   ·",
+      "  ·   │  │▐███████████▌│  │   ·",
+      "  ·   │  │▐█  D·B·G  █▌│  │   ·",
+      "  ·   │  │▀███████████▀│  │   ·",
+      "  ·   │  │  ▐██▌ ▐██▌  │  │   ·",
+      "  ·   │  │  ████ ████  │  │   ·",
+      "  ·   │  │  ▀▀▀▀ ▀▀▀▀  │  │   ·",
+      "  ·   │  ╰─────────────╯  │   ·",
+      "  ·   │ · · · · · · · · · │   ·",
+      "  ·   ╰───────────────────╯   ·",
+      "  ·   · · · · · · · · · · ·   ·",
+      "",
+      "      Chonk holds the center.",
+      "",
+      "  q to close",
+      "",
+    }
+    local sbuf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(sbuf, 0, -1, false, secret)
+    local sw = 48
+    local sh = #secret
+    local ww = vim.api.nvim_win_get_width(0)
+    local wh = vim.api.nvim_win_get_height(0)
+    local swin = vim.api.nvim_open_win(sbuf, true, {
+      relative = "win",
+      width    = sw,
+      height   = sh,
+      row      = math.max(0, math.floor((wh - sh) / 2)),
+      col      = math.max(0, math.floor((ww - sw) / 2)),
+      style    = "minimal",
+      border   = "rounded",
+      zindex   = 60,
+    })
+    vim.bo[sbuf].modifiable = false
+    vim.bo[sbuf].buftype    = "nofile"
+    local function close_secret()
+      if vim.api.nvim_win_is_valid(swin) then
+        vim.api.nvim_win_close(swin, true)
+      end
+    end
+    vim.keymap.set("n", "q",     close_secret, { buffer = sbuf, silent = true })
+    vim.keymap.set("n", "<Esc>", close_secret, { buffer = sbuf, silent = true })
+    vim.keymap.set("n", "<CR>",  close_secret, { buffer = sbuf, silent = true })
+    vim.keymap.set("n", ";",     close_secret, { buffer = sbuf, silent = true })
+    vim.api.nvim_create_autocmd("WinLeave", {
+      buffer = sbuf, once = true,
+      callback = function() pcall(vim.api.nvim_win_close, swin, true) end,
+    })
+  end, "Dev secret")
+
+  -- Open query pad below only if a connection exists
+  vim.schedule(function()
+    if not vim.api.nvim_buf_is_valid(welcome_buf) then return end
+    local conn = cur_conn()
+    if conn then
+      require("dadbod-grip.query_pad").open(conn)
+    end
+  end)
+end
+
 -- ── setup ─────────────────────────────────────────────────────────────────
 function M.setup(opts)
   opts = opts or {}
@@ -1064,6 +1373,11 @@ function M.setup(opts)
       return " "
     end)
     arg = vim.trim(arg)
+    -- No arg: show welcome screen (resolve_query handles <cword> fallback when needed)
+    if arg == "" then
+      M.open_welcome()
+      return
+    end
     M.open(arg, nil, next(grip_opts) and grip_opts or nil)
   end, {
     nargs = "?",
@@ -1674,6 +1988,40 @@ function M.setup(opts)
     nargs = "?",
     desc  = "Switch database connection",
   })
+
+  -- :GripStart — open the Softrear Analyst Portal directly
+  vim.api.nvim_create_user_command("GripStart", function()
+    local connections = require("dadbod-grip.connections")
+    local conns = connections.list()
+    for _, c in ipairs(conns) do
+      if c._is_demo then
+        -- Seed on first open
+        if c._demo_sql and c._demo_sql ~= "" then
+          local db_path = c.url:gsub("^duckdb:", ""):gsub("^sqlite:", "")
+          if vim.fn.filereadable(db_path) == 0 then
+            vim.fn.mkdir(vim.fn.fnamemodify(db_path, ":h"), "p")
+            local bin = db_path:match("%.duckdb$") and "duckdb" or "sqlite3"
+            vim.fn.system(bin .. " " .. vim.fn.shellescape(db_path)
+              .. " < " .. vim.fn.shellescape(c._demo_sql))
+          end
+        end
+        connections.switch(c.url)
+        vim.schedule(function()
+          vim.notify(
+            "Softrear Inc. Analyst Portal\xe2\x84\xa2  \xe2\x80\x94  walkthrough: docs/softrear-internal.md",
+            vim.log.levels.INFO
+          )
+        end)
+        return
+      end
+    end
+    vim.notify("Softrear Portal not found. Is the plugin in your runtimepath?", vim.log.levels.WARN)
+  end, { desc = "Open the Softrear Inc. Analyst Portal" })
+
+  -- :GripHome — return to the welcome screen from anywhere
+  vim.api.nvim_create_user_command("GripHome", function()
+    M.open_welcome()
+  end, { desc = "Open dadbod-grip welcome screen" })
 end
 
 -- Exposed for testing

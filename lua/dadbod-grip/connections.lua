@@ -190,6 +190,54 @@ function M.list()
     table.insert(all, { name = "vim.g.db", url = gdb, source = "global" })
   end
 
+  -- ── Starter connections — shown until dismissed or already present ──────
+  local data_dir = vim.fn.stdpath("data") .. "/grip"
+  local has_duck = vim.fn.executable("duckdb") == 1
+
+  local starters = {
+    {
+      id   = "duckdb_memory",
+      name = "DuckDB (memory)  · read files; no cross-query state",
+      url  = "duckdb::memory:",
+      cond = has_duck,
+    },
+    {
+      id   = "duckdb_scratch",
+      name = "DuckDB (scratch) · /tmp/grip_scratch.duckdb",
+      url  = "duckdb:/tmp/grip_scratch.duckdb",
+      cond = has_duck,
+    },
+    {
+      id   = "sqlite_scratch",
+      name = "SQLite  (scratch) · /tmp/grip_scratch.db",
+      url  = "sqlite:/tmp/grip_scratch.db",
+      cond = true,
+    },
+  }
+  for _, s in ipairs(starters) do
+    local hidden_f = data_dir .. "/" .. s.id .. ".hidden"
+    if s.cond and not seen[s.url] and vim.fn.filereadable(hidden_f) == 0 then
+      table.insert(all, { name = s.name, url = s.url, _builtin_id = s.id })
+    end
+  end
+
+  -- Softrear Inc. Analyst Portal™ — built-in, always at the bottom
+  local hidden = vim.fn.stdpath("data") .. "/grip/softrear.hidden"
+  local sql_files = vim.api.nvim_get_runtime_file("demo/softrear.sql", false)
+  if #sql_files > 0 and vim.fn.filereadable(hidden) == 0 then
+    local has_duck = vim.fn.executable("duckdb") == 1
+    local ext      = has_duck and ".duckdb" or ".db"
+    local db_path  = vim.fn.stdpath("data") .. "/grip/softrear" .. ext
+    local seed     = has_duck and sql_files[1]
+      or (vim.api.nvim_get_runtime_file("demo/softrear_sqlite.sql", false)[1] or "")
+    table.insert(all, {
+      name      = "Softrear Inc. Analyst Portal\xe2\x84\xa2",
+      url       = (has_duck and "duckdb:" or "sqlite:") .. db_path,
+      _is_demo  = true,
+      _demo_sql = seed,
+    })
+  end
+
   return all
 end
 
@@ -289,6 +337,9 @@ function M.switch(url, name, conn_type, opts)
       schema.refresh(url)
     end
 
+    -- Show welcome screen in the main content area
+    require("dadbod-grip").open_welcome()
+
     local query_pad = require("dadbod-grip.query_pad")
     query_pad.open(url)
 
@@ -327,13 +378,29 @@ end
 local function prompt_new_connection()
   local CANCEL = "\0"
   local ok, url = pcall(vim.fn.input, { prompt = "Connection URL: ", cancelreturn = CANCEL })
-  if not ok or url == CANCEL or url == "" then return end
+  if not ok or url == CANCEL or url == "" then
+    require("dadbod-grip").open_welcome(); return
+  end
 
   local ok2, name = pcall(vim.fn.input, { prompt = "Connection name: ", cancelreturn = CANCEL })
-  if not ok2 or name == CANCEL or name == "" then return end
+  if not ok2 or name == CANCEL or name == "" then
+    require("dadbod-grip").open_welcome(); return
+  end
 
   M.add(name, url)
   M.switch(url, name)
+end
+
+--- Connect once without saving to connections.json.
+--- Passes nil name so M.switch() skips the auto-persist path.
+local function prompt_temp_connection()
+  local CANCEL = "\0"
+  local ok, url = pcall(vim.fn.input, { prompt = "Connect once (URL, not saved): ", cancelreturn = CANCEL })
+  if not ok or url == CANCEL or url == "" then
+    require("dadbod-grip").open_welcome(); return
+  end
+  -- nil name → M.switch() won't auto-persist (see "if not already_saved and name" guard)
+  M.switch(url, nil, nil, nil)
 end
 
 --- Open a picker to select and switch connection. Uses grip_picker (zero external deps).
@@ -349,13 +416,15 @@ function M.pick()
     max_name = math.max(max_name, vim.fn.strdisplaywidth(c.name))
   end
 
-  -- Sentinel item for "new connection"
-  local new_sentinel = { name = "+ New connection...", url = "", _new = true }
+  -- Sentinel items at bottom of list
+  local new_sentinel  = { name = "+ New connection...",          url = "", _new  = true }
+  local temp_sentinel = { name = "~ Connect once (no save)...", url = "", _temp = true }
   local picker_items = {}
   for _, c in ipairs(conns) do
     table.insert(picker_items, c)
   end
   table.insert(picker_items, new_sentinel)
+  table.insert(picker_items, temp_sentinel)
 
   -- Track which connection URLs have password reveal active
   local show_pass = {}
@@ -363,8 +432,9 @@ function M.pick()
   require("dadbod-grip.grip_picker").open({
     title = "Connections",
     items = picker_items,
+    on_cancel = function() require("dadbod-grip").open_welcome() end,
     display = function(c)
-      if c._new then return c.name end
+      if c._new or c._temp then return c.name end
       local is_file = c.type == "file" or (not c.type and is_file_url(c.url))
       local tag = is_file and "[file] " or "[db]   "
       local pad = string.rep(" ", max_name - vim.fn.strdisplaywidth(c.name))
@@ -374,23 +444,70 @@ function M.pick()
     on_select = function(c)
       if c._new then
         prompt_new_connection()
+      elseif c._temp then
+        prompt_temp_connection()
       else
-        M.switch(c.url, c.name, c.type)
+        -- Lazy-seed the portal DB on first selection
+        if c._is_demo and c._demo_sql and c._demo_sql ~= "" then
+          local db_path = c.url:gsub("^duckdb:", ""):gsub("^sqlite:", "")
+          if vim.fn.filereadable(db_path) == 0 then
+            vim.fn.mkdir(vim.fn.fnamemodify(db_path, ":h"), "p")
+            local bin = db_path:match("%.duckdb$") and "duckdb" or "sqlite3"
+            vim.fn.system(bin .. " " .. vim.fn.shellescape(db_path)
+              .. " < " .. vim.fn.shellescape(c._demo_sql))
+          end
+          -- Open portal without persisting to connections.json (no name arg)
+          M.switch(c.url)
+        else
+          M.switch(c.url, c.name, c.type)
+        end
       end
     end,
     on_delete = function(c, refresh_fn)
-      if c._new then return end
+      if c._new or c._temp then return end
       local CANCEL = "\0"
+      -- Starter built-in: write a hidden flag so it never appears again
+      if c._builtin_id then
+        local ok, ans = pcall(vim.fn.input, { prompt = "Remove '" .. c.name .. "'? (y/N): ", cancelreturn = CANCEL })
+        if ok and (ans == "y" or ans == "yes") then
+          vim.fn.mkdir(vim.fn.stdpath("data") .. "/grip", "p")
+          vim.fn.writefile({}, vim.fn.stdpath("data") .. "/grip/" .. c._builtin_id .. ".hidden")
+          local new_items = {}
+          for _, nc in ipairs(M.list()) do table.insert(new_items, nc) end
+          table.insert(new_items, new_sentinel)
+          table.insert(new_items, temp_sentinel)
+          refresh_fn(new_items)
+        end
+        return
+      end
+      -- Portal deletion: write a flag file so it never appears again
+      if c._is_demo then
+        local ok, ans = pcall(vim.fn.input, { prompt = "Remove Softrear Portal? (y/N): ", cancelreturn = CANCEL })
+        if ok and (ans == "y" or ans == "yes") then
+          vim.fn.mkdir(vim.fn.stdpath("data") .. "/grip", "p")
+          vim.fn.writefile({}, vim.fn.stdpath("data") .. "/grip/softrear.hidden")
+          local new_conns = M.list()
+          local new_items = {}
+          for _, nc in ipairs(new_conns) do
+            table.insert(new_items, nc)
+          end
+          table.insert(new_items, new_sentinel)
+          table.insert(new_items, temp_sentinel)
+          refresh_fn(new_items)
+        end
+        return
+      end
       local ok, ans = pcall(vim.fn.input, { prompt = "Remove '" .. c.name .. "'? (y/N): ", cancelreturn = CANCEL })
       if ok and (ans == "y" or ans == "yes") then
         M.remove(c.name)
-        -- Rebuild list with updated sentinel at end
+        -- Rebuild list with updated sentinels at end
         local new_conns = M.list()
         local new_items = {}
         for _, nc in ipairs(new_conns) do
           table.insert(new_items, nc)
         end
         table.insert(new_items, new_sentinel)
+        table.insert(new_items, temp_sentinel)
         refresh_fn(new_items)
       end
     end,
@@ -400,10 +517,11 @@ function M.pick()
         label          = "!:write",
         close_on_select = true,
         when           = function(c)
-          return not c._new and (c.type == "file" or (not c.type and is_file_url(c.url)))
+          return not c._new and not c._temp
+              and (c.type == "file" or (not c.type and is_file_url(c.url)))
         end,
         fn             = function(c)
-          if c._new then return end
+          if c._new or c._temp then return end
           M.switch(c.url, c.name, c.type, { write = true })
         end,
       },
@@ -411,18 +529,18 @@ function M.pick()
         key            = "W",
         label          = "W:watch",
         close_on_select = true,
-        when           = function(c) return not c._new end,
+        when           = function(c) return not c._new and not c._temp end,
         fn             = function(c)
-          if c._new then return end
+          if c._new or c._temp then return end
           M.switch(c.url, c.name, c.type, { watch_ms = 5000 })
         end,
       },
       {
         key   = "M",
         label = "M:mask",
-        when  = function(c) return not c._new end,
+        when  = function(c) return not c._new and not c._temp end,
         fn    = function(c)
-          if c._new then return end
+          if c._new or c._temp then return end
           if show_pass[c.url] then
             show_pass[c.url] = nil
           else

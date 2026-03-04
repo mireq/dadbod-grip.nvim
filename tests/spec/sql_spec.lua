@@ -148,6 +148,33 @@ test("preview_staged: deletes come before updates", function()
   assert(del_idx < upd_idx, "DELETE should come before UPDATE")
 end)
 
+-- ── IS NULL in WHERE clause ──────────────────────────────────────────────────
+
+test("build_update: empty-string pk value uses IS NULL (csv null)", function()
+  -- CSV NULL is represented as "" — must not emit WHERE id = '' on typed PK columns
+  local result = sql.build_update("users", { id = "" }, { name = "alice" })
+  contains(result, '"id" IS NULL')
+  assert(not result:find('"id" = \'\'', 1, true), "should not have = ''")
+end)
+
+test("build_delete: empty-string pk value uses IS NULL (csv null)", function()
+  local result = sql.build_delete("users", { id = "" })
+  contains(result, '"id" IS NULL')
+  assert(not result:find('"id" = \'\'', 1, true), "should not have = ''")
+end)
+
+test("build_update: non-nil pk value still uses = (regression guard)", function()
+  local result = sql.build_update("users", { id = "1" }, { name = "bob" })
+  contains(result, '"id" = \'1\'')
+  assert(not result:find("IS NULL", 1, true), "should not have IS NULL for real pk")
+end)
+
+test("build_delete: non-nil pk value still uses = (regression guard)", function()
+  local result = sql.build_delete("orders", { order_id = "42" })
+  contains(result, '"order_id" = \'42\'')
+  assert(not result:find("IS NULL", 1, true), "should not have IS NULL for real pk")
+end)
+
 -- ── summary ─────────────────────────────────────────────────────────────────
 print(string.format("\nsql_spec: %d passed, %d failed", pass, fail))
 if fail > 0 then os.exit(1) end

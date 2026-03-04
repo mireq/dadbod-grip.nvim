@@ -11,6 +11,7 @@ local M = {}
 local _states = {}
 local _sidebar_bufnr = nil
 local _sidebar_winid = nil
+local _sidebar_saved_width = nil  -- persists across open/close cycles
 
 local SIDEBAR_WIDTH_RATIO = 0.25
 local SIDEBAR_MAX_WIDTH = 36
@@ -284,11 +285,26 @@ local function render(state)
     table.insert(lines, "")
   end
 
+  -- Pre-compute per-table max column name display width for type alignment.
+  local tbl_max_col_w = {}
+  local _cur_tbl = nil
+  for _, node in ipairs(nodes) do
+    if node.kind == "table" then
+      _cur_tbl = node.name
+      tbl_max_col_w[node.name] = tbl_max_col_w[node.name] or 0
+    elseif node.kind == "column" and _cur_tbl then
+      local w = vim.fn.strdisplaywidth(node.name)
+      if w > tbl_max_col_w[_cur_tbl] then tbl_max_col_w[_cur_tbl] = w end
+    end
+  end
+
+  local cur_tbl = nil
   for _, node in ipairs(nodes) do
     if node.kind == "header" then
       table.insert(lines, " " .. node.text)
       table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripHeader" })
     elseif node.kind == "table" then
+      cur_tbl = node.name
       local arrow = node.expanded and " ▼ " or " ▶ "
       local max_name = SIDEBAR_MAX_WIDTH - 3  -- subtract arrow chars
       local display_name = #node.name > max_name
@@ -296,22 +312,26 @@ local function render(state)
       table.insert(lines, arrow .. display_name)
       -- No special hl for table names — keep it clean
     elseif node.kind == "column" then
+      -- All prefixes are 6 display cols wide.
       local prefix
-      if node.pk and node.fk then prefix = "   🔑🔗"
-      elseif node.pk then prefix = "   🔑 "
-      elseif node.fk then prefix = "   🔗 "
-      else prefix = "      " end
-      local pad = string.rep(" ", math.max(1, 16 - #node.name))
-      local line = prefix .. " " .. node.name .. pad .. node.dtype
+      if node.pk and node.fk then prefix = "  🔑🔗"   -- 2 + 2 + 2 = 6
+      elseif node.pk           then prefix = "   🔑 "  -- 3 + 2 + 1 = 6
+      elseif node.fk           then prefix = "   🔗 "  -- 3 + 2 + 1 = 6
+      else                          prefix = "      "  -- 6 spaces
+      end
+      local max_w   = tbl_max_col_w[cur_tbl] or 16
+      local name_dw = vim.fn.strdisplaywidth(node.name)
+      local pad     = string.rep(" ", math.max(1, max_w - name_dw + 2))
+      local line    = prefix .. " " .. node.name .. pad .. node.dtype
       table.insert(lines, line)
-      -- Highlight type dim
+      -- Highlight type dim (byte offsets)
       local type_start = #prefix + 1 + #node.name + #pad
       table.insert(highlights, { line = #lines - 1, col = type_start, end_col = #lines[#lines], hl = "GripReadonly" })
       if node.pk then
-        table.insert(highlights, { line = #lines - 1, col = 3, end_col = 3 + #"🔑", hl = "GripBoolTrue" })
+        table.insert(highlights, { line = #lines - 1, col = 2, end_col = 2 + #"🔑", hl = "GripBoolTrue" })
       end
       if node.fk then
-        local fk_start = node.pk and 3 + #"🔑" or 3
+        local fk_start = node.pk and 2 + #"🔑" or 3
         table.insert(highlights, { line = #lines - 1, col = fk_start, end_col = fk_start + #"🔗", hl = "GripUrl" })
       end
     elseif node.kind == "sep" then
@@ -325,18 +345,10 @@ local function render(state)
     table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripReadonly" })
   end
 
-  -- Hint line at bottom (wrap for narrow sidebars)
+  -- Hint line at bottom
   table.insert(lines, "")
-  local sw = math.max(SIDEBAR_MIN_WIDTH, math.min(SIDEBAR_MAX_WIDTH, math.floor(vim.o.columns * SIDEBAR_WIDTH_RATIO)))
-  if sw >= 40 then
-    table.insert(lines, " CR:open  go:tables  q:query  gq:saved  gw:grid  gc:conn  /:filter  F:clear  ?:help")
-    table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripReadonly" })
-  else
-    table.insert(lines, " CR:open  go:tables  q:query  gq:saved  gw:grid")
-    table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripReadonly" })
-    table.insert(lines, " gc:conn  /:filter  F:clear  ?:help")
-    table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripReadonly" })
-  end
+  table.insert(lines, " CR go q gq gw gc / F ?")
+  table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripReadonly" })
 
   vim.bo[_sidebar_bufnr].modifiable = true
   vim.api.nvim_buf_set_lines(_sidebar_bufnr, 0, -1, false, lines)
@@ -368,19 +380,7 @@ end
 --- Find the best non-sidebar window to reuse for a new grid.
 --- Prefers an existing grip grid window over the query pad.
 local function find_right_win()
-  local view = require("dadbod-grip.view")
-  local fallback = nil
-  for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-    local bufnr = vim.api.nvim_win_get_buf(winid)
-    if bufnr ~= _sidebar_bufnr then
-      -- Prefer a grip grid window
-      if view._sessions[bufnr] then
-        return winid
-      end
-      if not fallback then fallback = winid end
-    end
-  end
-  return fallback
+  return require("dadbod-grip.view").find_content_win()
 end
 
 --- Open a table in a grip grid, reusing the adjacent window.
@@ -458,10 +458,12 @@ local function setup_keymaps(url)
     if not node then return end
     if node.is_file then
       if node.kind == "table" then
-        -- File table node: focus the grid (or re-open it)
-        local target_win = find_right_win()
-        if target_win then
-          vim.api.nvim_set_current_win(target_win)
+        -- File table node: focus grid if open, otherwise open the file
+        local view_mod = require("dadbod-grip.view")
+        local content_win = view_mod.find_content_win()
+        local content_buf = content_win and vim.api.nvim_win_get_buf(content_win)
+        if content_win and view_mod._sessions[content_buf] then
+          vim.api.nvim_set_current_win(content_win)
         else
           require("dadbod-grip").open(url, nil, {})
         end
@@ -567,15 +569,18 @@ local function setup_keymaps(url)
   map("n", function() jump_to_next_table(state, 1) end)
   map("N", function() jump_to_next_table(state, -1) end)
 
-  -- Refresh
-  map("r", function()
+  -- Refresh (r and R)
+  local function do_refresh()
     state.items = nil
     state.col_cache = {}
     state.pk_cache = {}
     state.fk_cache = {}
     fetch_tables(state)
     render(state)
-  end)
+    vim.notify("Grip: schema refreshed", vim.log.levels.INFO)
+  end
+  map("r", do_refresh)
+  map("R", do_refresh)
 
   -- Yank table/column name to clipboard
   map("y", function()
@@ -603,11 +608,13 @@ local function setup_keymaps(url)
     local node = node_at_cursor(state)
     if not node then return end
 
-    -- File nodes: focus grid or re-open the file (no ORDER BY for file-as-table)
+    -- File nodes: focus grid if open, otherwise open the file
     if node.is_file then
-      local target_win = find_right_win()
-      if target_win then
-        vim.api.nvim_set_current_win(target_win)
+      local view_mod = require("dadbod-grip.view")
+      local content_win = view_mod.find_content_win()
+      local content_buf = content_win and vim.api.nvim_win_get_buf(content_win)
+      if content_win and view_mod._sessions[content_buf] then
+        vim.api.nvim_set_current_win(content_win)
       else
         require("dadbod-grip").open(url, nil, {})
       end
@@ -653,6 +660,9 @@ local function setup_keymaps(url)
   -- gb: close sidebar (from inside; gb elsewhere opens/focuses it)
   map("gb", function() M.close() end)
 
+  -- Q: go to welcome screen (home)
+  map("Q", function() require("dadbod-grip").open_welcome() end)
+
   -- Query pad
   map("q", function()
     local query_pad = require("dadbod-grip.query_pad")
@@ -674,18 +684,11 @@ local function setup_keymaps(url)
     end)
   end)
 
-  -- Jump to grid window
-  map("gw", function()
-    local view = require("dadbod-grip.view")
-    for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-      local wbuf = vim.api.nvim_win_get_buf(winid)
-      if view._sessions[wbuf] then
-        vim.api.nvim_set_current_win(winid)
-        return
-      end
-    end
-    vim.notify("No grid window open", vim.log.levels.INFO)
-  end)
+  -- Jump to main content window: grid > welcome (silent no-op if neither exists)
+  vim.keymap.set("n", "gw", function()
+    local win = require("dadbod-grip.view").find_content_win()
+    if win then vim.api.nvim_set_current_win(win) end
+  end, { buffer = buf, silent = true, nowait = true })
 
   -- Switch connection (gC, gc, and C-g)
   local function _pick_conn()
@@ -880,8 +883,8 @@ function M.toggle(url)
     setup_keymaps(url)
   end
 
-  -- Open left split
-  local width = sidebar_width()
+  -- Open left split, restoring previous width if available
+  local width = _sidebar_saved_width or sidebar_width()
   vim.cmd("topleft vertical " .. width .. "split")
   _sidebar_winid = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(_sidebar_winid, _sidebar_bufnr)
@@ -909,6 +912,7 @@ end
 --- Close the schema sidebar.
 function M.close()
   if _sidebar_winid and vim.api.nvim_win_is_valid(_sidebar_winid) then
+    _sidebar_saved_width = vim.api.nvim_win_get_width(_sidebar_winid)
     vim.api.nvim_win_close(_sidebar_winid, true)
   end
   _sidebar_winid = nil

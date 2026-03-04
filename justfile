@@ -50,8 +50,12 @@ seed-httpfs:
 # Seed all test databases
 seed-all: seed-pg seed-sqlite seed-mysql seed-duckdb
 
-# Regenerate committed test databases from seed SQL
-reseed: seed-sqlite
+# Regenerate test databases from seed SQL
+reseed: seed-sqlite seed-duckdb
+
+# Open Neovim connected to the Softrear Analyst Portal (seeds on first run)
+start:
+    nvim --cmd "set rtp^=." -c "GripStart"
 
 # Open Neovim with the plugin loaded from this directory
 dev:

@@ -6,6 +6,7 @@ local M = {}
 
 local _pad_bufnr = nil
 
+
 --- Get or create the query pad buffer.
 local function ensure_buf(url)
   if _pad_bufnr and vim.api.nvim_buf_is_valid(_pad_bufnr) then
@@ -114,6 +115,11 @@ local function setup_keymaps(bufnr, url)
     saved.save_prompt(bufnr)
   end, { buffer = bufnr, silent = true, desc = "Grip: save query" })
 
+  -- q: go to welcome screen (home)
+  vim.keymap.set("n", "q", function()
+    require("dadbod-grip").open_welcome()
+  end, { buffer = bufnr, silent = true, nowait = true, desc = "Grip: welcome screen" })
+
   -- gA: AI SQL generation (keep g-prefix in query pad to preserve A=append-at-EOL)
   vim.keymap.set("n", "gA", function()
     local ai = require("dadbod-grip.ai")
@@ -125,18 +131,11 @@ local function setup_keymaps(bufnr, url)
     require("dadbod-grip.schema").toggle(cur_url())
   end, { buffer = bufnr, silent = true, desc = "Grip: schema browser" })
 
-  -- gw: jump to grid window (if one exists)
+  -- gw: jump to main content window: grid > welcome (silent no-op if neither exists)
   vim.keymap.set("n", "gw", function()
-    local view = require("dadbod-grip.view")
-    for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-      local wbuf = vim.api.nvim_win_get_buf(winid)
-      if view._sessions[wbuf] then
-        vim.api.nvim_set_current_win(winid)
-        return
-      end
-    end
-    vim.notify("No grid window open", vim.log.levels.INFO)
-  end, { buffer = bufnr, silent = true, desc = "Grip: jump to grid" })
+    local win = require("dadbod-grip.view").find_content_win()
+    if win then vim.api.nvim_set_current_win(win) end
+  end, { buffer = bufnr, silent = true, nowait = true, desc = "Grip: jump to grid" })
 
   -- go / gT / gt: table picker
   local function _pick_table()
@@ -167,6 +166,11 @@ local function setup_keymaps(bufnr, url)
       vim.bo[bufnr].modified = false
     end)
   end, { buffer = bufnr, silent = true, desc = "Grip: load saved query" })
+
+  -- Q: go to welcome screen (home)
+  vim.keymap.set("n", "Q", function()
+    require("dadbod-grip").open_welcome()
+  end, { buffer = bufnr, silent = true, desc = "Grip: welcome screen" })
 
   -- ?: help popup (same full grid help — useful for keymap reference while writing SQL)
   vim.keymap.set("n", "?", function()
@@ -224,10 +228,11 @@ function M.open(url, opts)
       end
       if target_win then
         vim.api.nvim_set_current_win(target_win)
-        -- If the target has a grip grid, split above it instead of replacing
+        -- If the target has a grip grid or welcome screen, split above it instead of replacing
         local target_buf = vim.api.nvim_win_get_buf(target_win)
+        local target_name = vim.api.nvim_buf_get_name(target_buf)
         local view_mod = require("dadbod-grip.view")
-        if view_mod._sessions[target_buf] then
+        if view_mod._sessions[target_buf] or target_name == "grip://welcome" then
           vim.cmd("aboveleft split")
           pad_win = vim.api.nvim_get_current_win()
           vim.api.nvim_win_set_buf(pad_win, bufnr)
@@ -243,12 +248,13 @@ function M.open(url, opts)
         vim.api.nvim_win_set_height(pad_win, math.max(6, math.min(12, math.floor(vim.o.lines * 0.2))))
       end
     else
-      -- Find a grip grid window and open above it
+      -- Find a grip grid or welcome window and open above it
       local view_mod = require("dadbod-grip.view")
       local grid_win = nil
       for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
         local wbuf = vim.api.nvim_win_get_buf(winid)
-        if view_mod._sessions[wbuf] then
+        local wname = vim.api.nvim_buf_get_name(wbuf)
+        if view_mod._sessions[wbuf] or wname == "grip://welcome" then
           grid_win = winid
           break
         end
@@ -307,6 +313,19 @@ function M.append_sql(sql_text, opts)
   if win ~= -1 then
     pcall(vim.api.nvim_win_set_cursor, win, { total, 0 })
   end
+end
+
+--- Silently sync the query pad with the SQL from the just-opened grid.
+--- Called automatically when a table or query opens so the pad always reflects
+--- the current grid. No-op if the pad buffer doesn't exist yet.
+--- Unlike append_sql, this always replaces without appending.
+function M.sync_query(sql_text)
+  if not _pad_bufnr or not vim.api.nvim_buf_is_valid(_pad_bufnr) then return end
+  if not sql_text or sql_text:match("^%s*$") then return end
+  local sql_lines = vim.split(sql_text, "\n")
+  vim.bo[_pad_bufnr].modifiable = true
+  vim.api.nvim_buf_set_lines(_pad_bufnr, 0, -1, false, sql_lines)
+  vim.bo[_pad_bufnr].modified = false
 end
 
 --- Get the current query pad content (nil if empty or hint-only).

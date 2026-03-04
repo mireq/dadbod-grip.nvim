@@ -2,3 +2,7 @@
 *.swp
 *.swo
 .grip/
+tests/*.duckdb
+tests/*.db
+demo/*.duckdb
+demo/*.db

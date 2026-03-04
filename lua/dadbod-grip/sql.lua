@@ -48,7 +48,11 @@ function M.build_update(table_name, pk_values, changes)
 
   local where_parts = {}
   for col, val in pairs(pk_values) do
-    table.insert(where_parts, quote_ident(col) .. " = " .. M.quote_value(val))
+    if val == nil or val == "" then
+      table.insert(where_parts, quote_ident(col) .. " IS NULL")
+    else
+      table.insert(where_parts, quote_ident(col) .. " = " .. M.quote_value(val))
+    end
   end
   table.sort(where_parts)
 
@@ -97,7 +101,11 @@ end
 function M.build_delete(table_name, pk_values)
   local where_parts = {}
   for col, val in pairs(pk_values) do
-    table.insert(where_parts, quote_ident(col) .. " = " .. M.quote_value(val))
+    if val == nil or val == "" then
+      table.insert(where_parts, quote_ident(col) .. " IS NULL")
+    else
+      table.insert(where_parts, quote_ident(col) .. " = " .. M.quote_value(val))
+    end
   end
   table.sort(where_parts)
 

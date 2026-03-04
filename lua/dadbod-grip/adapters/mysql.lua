@@ -45,7 +45,7 @@ end
 
 --- Build mysql CLI args and run a query.
 local function mysql_query(parsed, sql_str, timeout_ms)
-  local args = { "mysql", "--csv", "--init-command=SET sql_mode='ANSI_QUOTES'" }
+  local args = { "mysql", "--csv", "--init-command=SET sql_mode='ANSI_QUOTES,NO_BACKSLASH_ESCAPES'" }
   if parsed.host then
     args[#args + 1] = "-h"
     args[#args + 1] = parsed.host
@@ -81,7 +81,7 @@ end
 
 --- Run a DML statement (uses --batch instead of --csv for affected-row output).
 local function mysql_exec(parsed, sql_str, timeout_ms)
-  local args = { "mysql", "--batch", "--init-command=SET sql_mode='ANSI_QUOTES'" }
+  local args = { "mysql", "--batch", "--init-command=SET sql_mode='ANSI_QUOTES,NO_BACKSLASH_ESCAPES'" }
   if parsed.host then
     args[#args + 1] = "-h"
     args[#args + 1] = parsed.host

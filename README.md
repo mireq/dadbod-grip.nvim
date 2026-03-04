@@ -24,7 +24,7 @@ Edit data like a GUI. Navigate like Vim. Never leave your editor.
 </td>
 </tr></table>
 
-**Edit database tables like Vim buffers.** Rows are color-coded as you stage changes: blue for modified, red for deleted, green for inserted. A live SQL float generates the exact DML as you work. Preview the full mutation before it touches the DB, then apply in a single transaction. Reverse committed transactions. Navigate foreign keys through a breadcrumb trail. Browse schema in a sidebar with PK/FK markers and instant table open. Issue DDL through the UI: create tables, rename columns, drop with CASCADE. Profile column distributions with sparklines. Explain query plans in plain English. Generate SQL from natural language via Anthropic, OpenAI, Gemini, or Ollama. Open Parquet, CSV, and remote URLs as live DuckDB tables — with `--write` to edit files in-place and `--watch` to auto-refresh on a timer. Connects to PostgreSQL, SQLite, MySQL, and DuckDB. Every Vim motion works. Nothing installs outside Neovim.
+**Edit database tables like Vim buffers.** Rows are color-coded as you stage changes: teal for modified, red for deleted, green for inserted. A live SQL float generates the exact DML as you work. Preview the full mutation before it touches the DB, then apply in a single transaction. Reverse committed transactions. Navigate foreign keys through a breadcrumb trail. Browse schema in a sidebar with PK/FK markers and instant table open. Issue DDL through the UI: create tables, rename columns, drop with CASCADE. Profile column distributions with sparklines. Explain query plans in plain English. Generate SQL from natural language via Anthropic, OpenAI, Gemini, or Ollama. Open Parquet, CSV, and remote URLs as live DuckDB tables — with `--write` to edit files in-place and `--watch` to auto-refresh on a timer. Connects to PostgreSQL, SQLite, MySQL, and DuckDB. Every Vim motion works. Nothing installs outside Neovim.
 
 | **Editing** | **Analysis** | **Schema & AI** |
 |---|---|---|
@@ -46,25 +46,41 @@ Edit data like a GUI. Navigate like Vim. Never leave your editor.
 
 Then `:GripConnect` to pick your database. That's it. Schema sidebar + query pad open automatically.
 
+### Connection strings
+
+```
+postgresql://user:pass@host:5432/dbname
+mysql://user:pass@host:3306/dbname
+sqlite:path/to/file.db
+duckdb:path/to/file.duckdb
+
+/path/to/file.csv          ← direct file (also .parquet .json .xlsx)
+https://host/data.parquet  ← remote file via httpfs
+
+duckdb::memory:            ← single-query scratch (tables don't persist between queries)
+```
+
 ## What it looks like
 
-![Schema sidebar, 4 staged mutations, saved queries picker with SQL preview, and Live SQL float](grap.png)
+![Schema sidebar, staged mutations with color-coded rows, and analytical query pad](assets/grap.png)
 
-**Left:** Schema browser with PK/FK markers and column types. 
-**Grid:** 4 staged mutations: modified row highlighted blue, deleted row struck through red. 
-**Float:** Saved queries picker with instant SQL preview. 
-**Right:** Live SQL float showing the exact DELETE and UPDATE statements generated as you edit. The SQL is written for you. Nothing hits the database until you press `a`.
+**Left:** Schema browser showing all 17 tables with PK/FK markers and column types.
+**Grid:** Three mutation states visible simultaneously: red strikethrough (staged delete), teal (staged update), green (staged insert). Nothing hits the database until you press `a`.
+**Top right:** Query pad with a SQL query.
+**Values:** `resolved` column color-codes true/false. Severity values highlight out-of-range rows. NULL cells display as `•NULL•`.
+
+An example database is included. `:GripStart` opens it. Seventeen tables. Something in the consumer incidents does not add up. Walkthrough: [docs/softrear-internal.md](docs/softrear-internal.md)
 
 ## Features
 
 ### Data Editing
 - **Inline cell editing** with a popup editor, NULL handling, and type-aware display.
-- **Visual change staging** with color-coded rows (blue=modified, red=deleted, green=inserted).
+- **Visual change staging** with color-coded rows (teal=modified, red=deleted, green=inserted).
 - **Pure SQL generation** with live preview before applying changes.
 - **Transaction safety** wraps all DML in BEGIN/COMMIT with ROLLBACK on error.
 - **Batch editing** in visual mode to set, delete, or NULL multiple rows at once.
-- **Two-tier undo + redo**: local staging undo (50-deep) with `<C-r>` redo, plus transaction undo that reverses committed changes (10-deep, with confirmation).
-- **Mutation preview**: `UPDATE`, `DELETE`, and `INSERT` from the query pad show affected rows before executing. SET values appear blue (modified), DELETE rows appear red, INSERT rows appear green. Press `a` to execute, `u` to cancel.
+- **Two-tier undo + redo**: local staging undo (50-deep) with `<C-r>` redo, plus transaction undo that reverses committed changes (10-deep, with confirmation). NULL values in typed columns (boolean, integer, geometry) are correctly restored as SQL NULL — not as empty strings.
+- **Mutation preview**: `UPDATE`, `DELETE`, and `INSERT` from the query pad show affected rows before executing. SET values appear teal (modified), DELETE rows appear red, INSERT rows appear green. Press `a` to execute, `u` to cancel.
 
 ### Query and Navigation
 - **Sort, filter, and pagination** using `s`/`S` to sort, `f`/`<C-f>`/`F` to filter, `gp`/`gP` for saved filter presets, and `H`/`L` to page (or `]p`/`[p`).
@@ -102,6 +118,7 @@ Then `:GripConnect` to pick your database. That's it. Schema sidebar + query pad
 - **Multi-schema PostgreSQL**: all schemas visible in sidebar (not just `public`). Tables from other schemas appear as `schema.table`.
 - **File-as-table** support where `:Grip /path/to/data.parquet` opens Parquet/CSV/JSON/XLSX files via DuckDB.
 - **Remote file querying** where `:Grip https://example.com/data.csv` opens remote files via DuckDB httpfs.
+- **MySQL backslash safety**: MySQL sessions use `NO_BACKSLASH_ESCAPES` so backslashes in cell values are treated as literals, not escape characters. Values like `C:\path\to\file` round-trip correctly.
 
 ### File Modes: Watch and Write
 
@@ -151,7 +168,7 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `-` | Hide column under cursor |
 | `g-` | Restore all hidden columns |
 | `gH` | Column visibility picker |
-| `=` | Expand/reset column width under cursor |
+| `=` | Cycle column width: compact → expanded (full, uncapped) → reset |
 | `{`/`}` | Previous / next modified row |
 | `<CR>` | Expand cell value in popup |
 | `K` | Row view (vertical transpose) |
@@ -194,6 +211,7 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `F` | Clear all filters |
 | `gp` | Load saved filter preset |
 | `gP` | Save current filter as preset |
+| `gn` | Filter: column IS NULL |
 | `X` | Reset view (clear sort/filter/page) |
 | `H` / `L` | Previous / next page |
 | `]p` / `[p` | Previous / next page (alternate) |
@@ -245,6 +263,7 @@ Keys `2`–`9` also work in the schema sidebar to open any table directly in the
 | `gi` | Table info (columns, types, PKs) |
 | `gI` | Table properties (columns, indexes, stats) |
 | `ge` | Explain cell under cursor |
+| `gV` | DDL float (CREATE TABLE with columns, PKs, FKs, indexes) |
 
 ### Schema & Workflow
 

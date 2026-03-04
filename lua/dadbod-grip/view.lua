@@ -11,6 +11,21 @@ local VERSION = require("dadbod-grip.version")
 local M = {}
 M._sessions = {}  -- [bufnr] = { state, url, query_sql }
 
+--- Canonical content window finder: grid > welcome screen > nil.
+--- All window-placement callers use this. Never returns sidebar or query pad.
+function M.find_content_win()
+  local wins = vim.api.nvim_tabpage_list_wins(0)
+  for _, wid in ipairs(wins) do
+    if M._sessions[vim.api.nvim_win_get_buf(wid)] then return wid end
+  end
+  for _, wid in ipairs(wins) do
+    if vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(wid)) == "grip://welcome" then
+      return wid
+    end
+  end
+  return nil
+end
+
 -- ── profiling (set GRIP_PROFILE=1 to enable) ───────────────────────────────
 local PROFILE = os.getenv("GRIP_PROFILE")
 local function profile(name, fn)
@@ -69,11 +84,11 @@ local function ensure_highlights()
   -- Staged groups have guibg; conditional groups are fg-only.
   vim.cmd("hi! GripHeader    gui=bold cterm=bold")
   vim.cmd("hi! GripNull      gui=italic ctermfg=243 guifg=#6c7086")
-  vim.cmd("hi! GripModified  gui=bold ctermfg=111 guifg=#89b4fa ctermbg=236 guibg=#1a1e2e")
+  vim.cmd("hi! GripModified  gui=bold ctermfg=177 guifg=#c084fc ctermbg=236 guibg=#1a0a30")
   vim.cmd("hi! GripDeleted   gui=strikethrough ctermfg=203 guifg=#f38ba8 ctermbg=236 guibg=#2d1418")
   vim.cmd("hi! GripInserted  gui=bold ctermfg=113 guifg=#a6e3a1 ctermbg=236 guibg=#162d18")
-  -- Staged NULL: pink fg on same dark-blue bg as GripModified — signals "value cleared" (distinct from red=deleted)
-  vim.cmd("hi! GripNullStaged gui=bold ctermfg=219 guifg=#f5c2e7 ctermbg=236 guibg=#1a1e2e")
+  -- Staged NULL: peach/flamingo fg — signals "value cleared" (distinct from red=deleted, violet=modified)
+  vim.cmd("hi! GripNullStaged gui=bold ctermfg=216 guifg=#fab387 ctermbg=236 guibg=#2d1800")
   vim.cmd("hi! GripReadonly  gui=italic ctermfg=243 guifg=#6c7086")
   vim.cmd("hi! GripBorder    gui=bold ctermfg=147 guifg=#cba6f7")
   vim.cmd("hi! GripStatusOk  gui=bold ctermfg=229 guifg=#f9e2af")
@@ -85,13 +100,14 @@ local function ensure_highlights()
   vim.cmd("hi! GripUrl       gui=underline ctermfg=117 guifg=#89b4fa")
   vim.cmd("hi! GripWatch     gui=bold ctermfg=117 guifg=#89b4fa")
 end
+ensure_highlights() -- define groups on module load so welcome screen can use them
 
 -- ── column width calculation ──────────────────────────────────────────────
 local function calc_col_widths(columns, rows, max_width)
   local widths = {}
   for _, col in ipairs(columns) do
-    -- +2 reserves space for the sort indicator (e.g. " ▲") so the col name is never truncated
-    widths[col] = math.min(vim.fn.strdisplaywidth(col) + 2, max_width)
+    -- +3 reserves space for stacked sort indicators (e.g. " ▲1") so the col name is never truncated
+    widths[col] = math.min(vim.fn.strdisplaywidth(col) + 3, max_width)
   end
   -- For large tables, sample first 100 + last 10 rows instead of scanning all
   local n = #rows
@@ -853,14 +869,21 @@ end
 --- Pure helper: given visible columns, their byte positions, and a cursor byte offset,
 --- return { col_name, col_idx } for the column the cursor belongs to.
 --- Snaps LEFT (to the previous column) when cursor is in a separator region,
---- matching nav_col() behavior. Used by get_cell() and testable without vim state.
+--- EXCEPT when the cursor is exactly one byte before a column start (last separator
+--- byte) — in that case snaps RIGHT to the next column. This ensures that actions
+--- (edit, sort, filter) fire on the column the user is reaching toward, not the
+--- one they left. Used by get_cell() and testable without vim state.
 function M._snap_col(vis_cols, bp_row, col_nr)
   local best_col, best_idx = nil, nil
   for i, col in ipairs(vis_cols) do
     local bp = bp_row[col]
     if bp then
       if col_nr < bp.start then
-        break  -- cursor is before this column; best_col is the snap target
+        -- Last separator byte (touching the column) → snap RIGHT to this column.
+        if col_nr == bp.start - 1 then
+          return { col_name = col, col_idx = i }
+        end
+        break  -- mid-separator: best_col (previous column) is the snap target
       end
       best_col, best_idx = col, i
     end
@@ -991,25 +1014,15 @@ function M.open(state, url, query_sql, opts)
       pcall(vim.api.nvim_buf_delete, prev_buf, { force = true })
     end
   else
-    -- Defensive: scan for an existing grip grid window to reuse.
-    -- Prevents window stacking when caller omits reuse_win.
-    local found_grid_win
-    if not (opts and opts.force_split) then
-      for _, wid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-        local wbuf = vim.api.nvim_win_get_buf(wid)
-        if wbuf ~= bufnr and M._sessions[wbuf] then
-          found_grid_win = wid
-          break
-        end
-      end
-    end
+    -- No explicit reuse_win: find the content window (grid > welcome) or create a split.
+    local content_win = not (opts and opts.force_split) and M.find_content_win() or nil
 
-    if found_grid_win then
-      -- Reuse the existing grid window (same logic as reuse_win above)
-      winid = found_grid_win
+    if content_win then
+      winid = content_win
       local prev_buf = vim.api.nvim_win_get_buf(winid)
       vim.api.nvim_win_set_buf(winid, bufnr)
       vim.api.nvim_set_current_win(winid)
+      -- Clean up old grip session if we replaced a grid
       if prev_buf ~= bufnr and M._sessions[prev_buf] then
         local old_s = M._sessions[prev_buf]
         if old_s then M._close_live_sql_float(old_s) end
@@ -1017,21 +1030,14 @@ function M.open(state, url, query_sql, opts)
         pcall(vim.api.nvim_buf_delete, prev_buf, { force = true })
       end
     else
-      -- No existing grid: create a new split
-      local cur_buf = vim.api.nvim_get_current_buf()
-      local cur_name = vim.api.nvim_buf_get_name(cur_buf)
-      if cur_name:match("grip://query") then
+      -- No grid or welcome screen: create a new split in the right area
+      local schema_mod = require("dadbod-grip.schema")
+      local right_win = schema_mod.is_open() and schema_mod.get_right_win()
+      if right_win then
+        vim.api.nvim_set_current_win(right_win)
         vim.cmd("belowright split")
       else
-        -- When sidebar is open, split within the right area (not full-width below)
-        local schema_mod = require("dadbod-grip.schema")
-        local right_win = schema_mod.is_open() and schema_mod.get_right_win()
-        if right_win then
-          vim.api.nvim_set_current_win(right_win)
-          vim.cmd("belowright split")
-        else
-          vim.cmd("botright split")
-        end
+        vim.cmd("botright split")
       end
       winid = vim.api.nvim_get_current_win()
       vim.api.nvim_win_set_buf(winid, bufnr)
@@ -1499,6 +1505,9 @@ function M._setup_keymaps(bufnr)
   local function map(key, fn, desc)
     vim.keymap.set("n", key, fn, { buffer = bufnr, desc = desc, silent = true })
   end
+
+  -- Q: go to welcome screen (home)
+  map("Q", function() require("dadbod-grip").open_welcome() end, "Welcome screen")
 
   -- q: open query pad (pre-filled with current query)
   map("q", function()
@@ -2435,12 +2444,11 @@ function M._setup_keymaps(bufnr)
     M.render(bufnr, session.state)
   end, "Restore all hidden columns")
 
-  -- =: toggle column width between expanded (full content) and default
+  -- =: minimize column to name width, or reset to default if already minimized
   map("=", function()
     local session = M._sessions[bufnr]
     if not session then return end
-    -- Try data row first; fall back to header/type row byte positions so = works
-    -- from the header (natural UX: look at truncated header, press =)
+    -- Resolve column via data row or row-type-aware byte positions (same logic as nav_col)
     local cell = M.get_cell(bufnr)
     local col
     if cell then
@@ -2448,20 +2456,28 @@ function M._setup_keymaps(bufnr)
     else
       local r = session._render
       if r then
-        local col_nr = vim.api.nvim_win_get_cursor(0)[2]
+        local cursor = vim.api.nvim_win_get_cursor(0)
+        local col_nr = cursor[2]
         local vis_cols = r.visible_columns or (session.state and session.state.columns) or {}
-        local bp = r.hdr_byte_positions
-        if bp then
-          for _, c in ipairs(vis_cols) do
-            local pos = bp[c]
-            if pos and col_nr >= pos.start and col_nr <= pos.finish then
-              col = c; break
-            end
+        local data_start = r.data_start or 4
+        local di = cursor[1] - data_start + 1
+        local ref_bp
+        if di < 1 then
+          -- header, type row, title, or separator row
+          local type_row_line = r.data_start and (r.data_start - 2)
+          if type_row_line and cursor[1] == type_row_line and r.type_row_byte_positions then
+            ref_bp = r.type_row_byte_positions
+          else
+            ref_bp = r.hdr_byte_positions
           end
-          if not col then
-            local snap = M._snap_col(vis_cols, bp, col_nr)
-            if snap then col = snap.col_name end
-          end
+        elseif r.byte_positions and r.byte_positions[di] then
+          ref_bp = r.byte_positions[di]
+        else
+          ref_bp = r.byte_positions and r.byte_positions[1] or r.hdr_byte_positions
+        end
+        if ref_bp then
+          local snap = M._snap_col(vis_cols, ref_bp, col_nr)
+          if snap then col = snap.col_name end
         end
       end
     end
@@ -2470,25 +2486,44 @@ function M._setup_keymaps(bufnr)
       return
     end
     if not session.col_width_overrides then session.col_width_overrides = {} end
-    if session.col_width_overrides[col] then
-      -- Reset to default width
-      session.col_width_overrides[col] = nil
-      vim.notify("Column width reset: " .. col, vim.log.levels.INFO)
-    else
-      -- Expand: scan all rows for maximum display width of this column
+    if not session._col_cycle        then session._col_cycle = {} end
+
+    -- Fixed indicator budget: 3 display chars covers " ▲1"/`` ▼2" (stacked sort).
+    -- Using a fixed constant means adding/removing stacked sorts after pressing `=`
+    -- never clips the header — the budget doesn't shrink when you press `=` on
+    -- a column with only a single-arrow sort (▲ = ind_w 2) and then stack more.
+    local ind_w = 3
+
+    local cycle = session._col_cycle[col]
+    if cycle == "compact" then
+      -- compact → expanded: scan ALL rows, no MAX_COL_WIDTH cap
       local st = session.state
-      local max_w = vim.fn.strdisplaywidth(col) + 2  -- header + sort indicator space
-      local ordered = data.get_ordered_rows(st)
-      for _, row_idx in ipairs(ordered) do
-        local v = data.effective_value(st, row_idx, col)
-        local display = (v == nil or v == "") and NULL_DISPLAY or tostring(v)
-        max_w = math.max(max_w, vim.fn.strdisplaywidth(display))
+      local full_w = vim.fn.strdisplaywidth(col) + ind_w
+      if st then
+        local ordered = data.get_ordered_rows(st)
+        for _, row_idx in ipairs(ordered) do
+          local v = data.effective_value(st, row_idx, col)
+          local display = (v == nil or v == "") and NULL_DISPLAY or tostring(v)
+          full_w = math.max(full_w, vim.fn.strdisplaywidth(display))
+        end
       end
-      session.col_width_overrides[col] = max_w
+      session.col_width_overrides[col] = full_w
+      session._col_cycle[col] = "expanded"
       vim.notify("Column expanded: " .. col, vim.log.levels.INFO)
+    elseif cycle == "expanded" then
+      -- expanded → auto: remove override
+      session.col_width_overrides[col] = nil
+      session._col_cycle[col] = nil
+      vim.notify("Column reset: " .. col, vim.log.levels.INFO)
+    else
+      -- auto → compact: collapse to name width only; indicator will clip, that's intentional
+      local compact_w = vim.fn.strdisplaywidth(col)
+      session.col_width_overrides[col] = compact_w
+      session._col_cycle[col] = "compact"
+      vim.notify("Column compacted: " .. col, vim.log.levels.INFO)
     end
     M.render(bufnr, session.state)
-  end, "Expand/reset column width")
+  end, "Compact/expand/reset column width (cycles)")
 
   -- gH: multi-select column visibility picker
   map("gH", function()
@@ -3540,7 +3575,7 @@ function M._setup_keymaps(bufnr)
     vim.cmd("GripExplain " .. explain_sql)
   end, "Explain current query")
 
-  -- gD: diff against another table
+  -- gD: diff against another table (picker with schema-overlap preview)
   map("gD", function()
     local session_d = M._sessions[bufnr]
     if not session_d then return end
@@ -3549,11 +3584,66 @@ function M._setup_keymaps(bufnr)
       vim.notify("Diff requires a table name", vim.log.levels.INFO)
       return
     end
-    local CANCEL = "\0"
-    local ok, other = pcall(vim.fn.input, { prompt = "Diff " .. st.table_name .. " against: ", cancelreturn = CANCEL })
-    if not ok or other == CANCEL or other == "" then return end
-    local diff_mod = require("dadbod-grip.diff")
-    diff_mod.open(st.table_name, other, st.url)
+    local db_mod = require("dadbod-grip.db")
+    local tables, err = db_mod.list_tables(st.url)
+    if not tables then
+      vim.notify("Grip: " .. (err or "failed to list tables"), vim.log.levels.ERROR)
+      return
+    end
+    if #tables == 0 then
+      vim.notify("Grip: no tables found", vim.log.levels.WARN)
+      return
+    end
+    -- Fetch source table columns once for preview comparison
+    local src_cols = db_mod.get_column_info(st.table_name, st.url) or {}
+    local src_set = {}
+    for _, col in ipairs(src_cols) do src_set[col.column_name] = true end
+
+    require("dadbod-grip.grip_picker").open({
+      title = "Diff " .. st.table_name .. " vs",
+      items = tables,
+      display = function(t)
+        local icon = t.type == "view" and "○" or "●"
+        return icon .. " " .. t.name
+      end,
+      preview = function(t)
+        local other_cols = db_mod.get_column_info(t.name, st.url) or {}
+        local other_set = {}
+        for _, col in ipairs(other_cols) do other_set[col.column_name] = true end
+        local lines = { st.table_name .. " ↔ " .. t.name, string.rep("─", 28), "" }
+        local shared, only_src, only_other = {}, {}, {}
+        for _, col in ipairs(src_cols) do
+          if other_set[col.column_name] then
+            table.insert(shared, "  = " .. col.column_name)
+          else
+            table.insert(only_src, "  - " .. col.column_name)
+          end
+        end
+        for _, col in ipairs(other_cols) do
+          if not src_set[col.column_name] then
+            table.insert(only_other, "  + " .. col.column_name)
+          end
+        end
+        if #shared > 0 then
+          table.insert(lines, "Shared (" .. #shared .. "):")
+          vim.list_extend(lines, shared)
+          table.insert(lines, "")
+        end
+        if #only_other > 0 then
+          table.insert(lines, "Only in " .. t.name .. ":")
+          vim.list_extend(lines, only_other)
+          table.insert(lines, "")
+        end
+        if #only_src > 0 then
+          table.insert(lines, "Only in " .. st.table_name .. ":")
+          vim.list_extend(lines, only_src)
+        end
+        return lines
+      end,
+      on_select = function(t)
+        require("dadbod-grip.diff").open(st.table_name, t.name, st.url)
+      end,
+    })
   end, "Diff against table")
 
   -- gV: show CREATE TABLE DDL in floating window
@@ -3871,7 +3961,7 @@ function M.show_help(opts)
       "  -         Hide column under cursor",
       "  g-        Restore all hidden columns",
       "  gH        Column visibility picker",
-      "  =         Expand/reset column width",
+      "  =         Cycle column width: compact → expanded → reset",
       "  $         Last column",
       "  e         Next column, land at end of cell",
       "  {/}       Prev / next modified row",
@@ -3925,12 +4015,13 @@ function M.show_help(opts)
       "  9         Constraints: CHECK, UNIQUE, NOT NULL",
       "",
       "  Schema & Workflow",
-      "  go        Toggle schema browser",
-      "  gT        Pick table (floating picker)",
+      "  go/gT/gt  Pick table (floating picker)",
+      "  gb        Schema browser (toggle/focus)",
       "  gO        Open as editable table (read-only → table)",
       "  gC/<C-g>  Switch database connection",
       "  gW        Toggle watch mode (auto-refresh on timer)",
       "  g!        Toggle write mode (apply overwrites file)",
+      "  Q         Welcome screen (home)",
       "  q         Open query pad",
       "  gq        Load saved query",
       "  gh        Query history browser",
@@ -3955,6 +4046,9 @@ function M.show_help(opts)
         " │ Without a PK, edits cannot target a      │",
         " │ specific row safely.                      │",
         " └──────────────────────────────────────────┘",
+        "",
+        "  Connections",
+        "  Softrear Inc. Analyst Portal\xe2\x84\xa2   :GripStart   Built-in case file (see docs/softrear-internal.md)",
         "",
         " ───────────────────────────────────────────",
         "",
@@ -3999,6 +4093,9 @@ function M.show_help(opts)
         "  Colors: modified=blue  deleted=red  inserted=green",
         "          negative=red  true=green  false=red",
         "          past-date=dim  url=underline",
+        "",
+        "  Connections",
+        "  Softrear Inc. Analyst Portal\xe2\x84\xa2   :GripStart   Built-in case file (see docs/softrear-internal.md)",
         "",
         " ───────────────────────────────────────────",
         "",

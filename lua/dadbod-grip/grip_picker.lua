@@ -45,15 +45,17 @@ function M.open(opts)
   assert(opts, "grip_picker.open: opts required")
   local display   = opts.display or tostring
   local on_select = opts.on_select
+  local on_cancel = opts.on_cancel  -- fn() called when closed without selection
   local on_delete = opts.on_delete
   local preview_fn = opts.preview   -- fn(item) -> string[] | nil
   local actions   = opts.actions or {}  -- list of {key, label, fn(item)}
   local title     = opts.title or "Grip Picker"
 
   -- Mutable state
-  local items  = opts.items or {}
-  local filter = ""
-  local cursor = 1
+  local items    = opts.items or {}
+  local filter   = ""
+  local cursor   = 1
+  local _selected = false  -- true once a real selection or action fires
 
   -- ── filter ──
 
@@ -274,11 +276,15 @@ function M.open(opts)
 
   -- Close (both picker and preview)
   local function close()
-    if vim.api.nvim_win_is_valid(win) then
+    local was_open = vim.api.nvim_win_is_valid(win)
+    if was_open then
       vim.api.nvim_win_close(win, true)
     end
     if preview_win and vim.api.nvim_win_is_valid(preview_win) then
       vim.api.nvim_win_close(preview_win, true)
+    end
+    if was_open and not _selected and on_cancel then
+      vim.schedule(on_cancel)
     end
   end
 
@@ -312,6 +318,7 @@ function M.open(opts)
     if #flist == 0 then return end
     local item = flist[cursor]
     if not item then return end
+    _selected = true
     close()
     if on_select then
       vim.schedule(function() on_select(item) end)
@@ -349,6 +356,7 @@ function M.open(opts)
       local item = flist[cursor]
       if not item then return end
       if action.close_on_select then
+        _selected = true
         close()
         if action.fn then vim.schedule(function() action.fn(item) end) end
       else

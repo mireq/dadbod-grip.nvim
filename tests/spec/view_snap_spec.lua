@@ -67,22 +67,36 @@ end)
 
 -- ── Separator positions: must snap LEFT ────────────────────────────────────
 
-test("_snap_col: cursor in sep between id/name snaps to id", function()
-  -- Separator bytes 6-10 (after id.finish=5, before name.start=11)
-  for col_nr = 6, 10 do
+test("_snap_col: cursor in sep between id/name snaps to id (mid-sep)", function()
+  -- Separator bytes 6-9 (mid-separator): snap LEFT to id
+  for col_nr = 6, 9 do
     local result = view._snap_col(vis_cols, bp_row, col_nr)
     eq(result.col_name, "id", "byte " .. col_nr .. " should snap to id")
     eq(result.col_idx, 1, "byte " .. col_nr .. " idx should be 1")
   end
 end)
 
-test("_snap_col: cursor in sep between name/email snaps to name", function()
-  -- Separator bytes 18-22 (after name.finish=17, before email.start=23)
-  for col_nr = 18, 22 do
+test("_snap_col: last sep byte before name snaps RIGHT to name", function()
+  -- Byte 10 = name.start - 1: cursor is touching name → snap RIGHT
+  local result = view._snap_col(vis_cols, bp_row, 10)
+  eq(result.col_name, "name", "byte 10 (last sep before name) should snap to name")
+  eq(result.col_idx, 2, "byte 10 idx should be 2")
+end)
+
+test("_snap_col: cursor in sep between name/email snaps to name (mid-sep)", function()
+  -- Separator bytes 18-21 (mid-separator): snap LEFT to name
+  for col_nr = 18, 21 do
     local result = view._snap_col(vis_cols, bp_row, col_nr)
     eq(result.col_name, "name", "byte " .. col_nr .. " should snap to name")
     eq(result.col_idx, 2, "byte " .. col_nr .. " idx should be 2")
   end
+end)
+
+test("_snap_col: last sep byte before email snaps RIGHT to email", function()
+  -- Byte 22 = email.start - 1: cursor is touching email → snap RIGHT
+  local result = view._snap_col(vis_cols, bp_row, 22)
+  eq(result.col_name, "email", "byte 22 (last sep before email) should snap to email")
+  eq(result.col_idx, 3, "byte 22 idx should be 3")
 end)
 
 -- ── Edge cases ──────────────────────────────────────────────────────────────

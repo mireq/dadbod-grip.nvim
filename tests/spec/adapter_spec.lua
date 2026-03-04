@@ -457,6 +457,45 @@ test("duckdb get_constraints: returns empty list on query failure", function()
   end)
 end)
 
+-- ── MySQL sql_mode: NO_BACKSLASH_ESCAPES ─────────────────────────────────────
+
+test("mysql query: --init-command includes NO_BACKSLASH_ESCAPES", function()
+  with_executable(function()
+    local args = capture_system_args("id\n1\n", function()
+      mysql.query("SELECT 1", "mysql://root@localhost/test")
+    end)
+    local init_cmd = nil
+    for _, v in ipairs(args) do
+      if type(v) == "string" and v:find("--init-command", 1, true) then
+        init_cmd = v; break
+      end
+    end
+    assert(init_cmd ~= nil, "must have --init-command arg")
+    contains(init_cmd, "NO_BACKSLASH_ESCAPES", "query sql_mode must include NO_BACKSLASH_ESCAPES")
+  end)
+end)
+
+test("mysql execute: --init-command includes NO_BACKSLASH_ESCAPES", function()
+  with_executable(function()
+    local captured_args
+    local orig = vim.system
+    vim.system = function(a)
+      captured_args = a
+      return { wait = function() return { stdout = "", stderr = "1 row affected", code = 0 } end }
+    end
+    mysql.execute("UPDATE t SET x=1 WHERE id=1", "mysql://root@localhost/test")
+    vim.system = orig
+    local init_cmd = nil
+    for _, v in ipairs(captured_args) do
+      if type(v) == "string" and v:find("--init-command", 1, true) then
+        init_cmd = v; break
+      end
+    end
+    assert(init_cmd ~= nil, "must have --init-command arg")
+    contains(init_cmd, "NO_BACKSLASH_ESCAPES", "execute sql_mode must include NO_BACKSLASH_ESCAPES")
+  end)
+end)
+
 -- ── summary ──────────────────────────────────────────────────────────────────
 
 print(string.format("\nadapter_spec: %d passed, %d failed", pass, fail))
