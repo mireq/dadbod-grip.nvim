@@ -243,10 +243,12 @@ NAVIGATION ~
   $               Last column
   { / }           Previous / next modified row
   K               Row view (vertical transpose of current row)
+                  JSON cell values are auto-pretty-printed inline
 
 EDITING ~
                                                             *grip-editing*
   i / <CR>        Edit cell under cursor (opens float editor)
+                  JSON cell values are pre-filled as formatted JSON
   x               Set cell to NULL
   p               Paste clipboard value into cell
   P               Paste multi-line clipboard into consecutive rows
@@ -269,6 +271,7 @@ SORT / FILTER / PAGINATION ~
   S               Stack secondary sort on column
   f               Quick filter by cell value (column = value)
   gn              Filter: column under cursor IS NULL
+  gF              Filter builder (=, !=, >, <, LIKE, IN, IS NULL/NOT NULL)
   <C-f>           Freeform WHERE clause filter
   F               Clear all filters
   gp              Load saved filter preset for current table
@@ -293,7 +296,8 @@ ANALYSIS AND EXPORT ~
   gR              Table profile (sparkline distributions)
   gV              Show CREATE TABLE DDL in floating window
   gD              Diff current table against another table
-  gE              Export table in 6 formats (see |grip-export|)
+  gE              Export to clipboard in 6 formats (see |grip-export|)
+  gX              Export to file (csv/json/sql) — also :GripExport
 
 INSPECTION ~
                                                         *grip-inspection*
@@ -390,6 +394,10 @@ sort (multi-column sorting).
 
 Filter ~
 Press `f` on a cell to quick-filter by that value (column = value).
+Press `gn` to filter by IS NULL on the column under the cursor.
+Press `gF` to open the filter builder: choose an operator (=, !=, >,
+<, LIKE, IN, IS NULL, IS NOT NULL) and enter a value. Numeric strings
+are passed unquoted; all others are single-quoted with escaping.
 Press `<C-f>` to enter a freeform WHERE clause. Multiple filters are
 AND-ed together. Press `F` to clear all filters.
 
@@ -504,8 +512,8 @@ Connections are deduplicated by URL across all sources.
 ==============================================================================
 14. EXPORT                                                   *grip-export*
 
-Press `gE` in a grid to export the current view. Six formats are
-available:
+Press `gE` in a grid to export the current view to the clipboard. Six
+formats are available:
 
   CSV .............. RFC 4180 compliant, quoted fields
   TSV .............. Tab-separated values
@@ -515,6 +523,14 @@ available:
   Grip Table ....... Box-drawing table matching the grid style
 
 All formats are copied to the system clipboard.
+
+Export to file ~                                              *:GripExport*
+Press `gX` or run `:GripExport` to write the current result set to a
+file. You are prompted for a format (csv, json, or sql) and a file path
+(defaults to the current directory). NULL values are represented as
+empty fields (CSV), JSON `null`, or the SQL `NULL` keyword. The table
+name is used in SQL INSERT statements; raw query results use
+`_grip_result` as the table name.
 
 Additional yank commands:
   y ................ Yank single cell value

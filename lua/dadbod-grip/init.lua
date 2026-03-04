@@ -428,7 +428,21 @@ local function do_edit(bufnr, cell, url)
   local prompt = (session.state.table_name or "row") .. "." .. cell.col_name
   local edited_row_idx = cell.row_idx
   local edited_col    = cell.col_name
-  editor.open(prompt, cell.value, function(new_val)
+
+  -- JSON-aware edit: pretty-print JSON/jsonb before opening the editor.
+  -- On save, the (still-valid JSON) value is written back as-is.
+  local initial_val = cell.value
+  if initial_val and #initial_val > 1 then
+    local json_ok, json_decoded = pcall(vim.fn.json_decode, initial_val)
+    if json_ok and type(json_decoded) == "table" then
+      local json_lines = view._json_to_lines and view._json_to_lines(json_decoded)
+      if json_lines and #json_lines > 0 then
+        initial_val = table.concat(json_lines, "\n")
+      end
+    end
+  end
+
+  editor.open(prompt, initial_val, function(new_val)
     if new_val == nil then return end  -- cancelled
 
     -- nil = NULL, anything else = new value
@@ -2031,6 +2045,12 @@ function M.setup(opts)
   vim.api.nvim_create_user_command("GripHome", function()
     M.open_welcome()
   end, { desc = "Open dadbod-grip welcome screen" })
+
+  -- :GripExport — export current result set to a file
+  vim.api.nvim_create_user_command("GripExport", function()
+    local bufnr = vim.api.nvim_get_current_buf()
+    view.do_export(bufnr)
+  end, { desc = "Export grip result to file (csv/json/sql)" })
 end
 
 -- Exposed for testing

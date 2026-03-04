@@ -117,6 +117,45 @@ function M.add_filter(spec, clause)
   return new
 end
 
+--- Build a SQL filter clause string from a column, operator, and user-supplied value.
+--- Handles quoting: numeric strings are unquoted, all others get single-quote wrapping.
+--- Operators: "=", "!=", ">", "<", "LIKE", "IN", "NULL", "NOT NULL"
+--- For "IN": value is comma-separated, each item quoted/unquoted individually.
+--- For "NULL" / "NOT NULL": value is ignored.
+function M.build_filter_clause(col, op, value)
+  local col_q = sql_mod.quote_ident(col)
+
+  -- IS NULL / IS NOT NULL — no value needed
+  if op == "NULL" then
+    return col_q .. " IS NULL"
+  elseif op == "NOT NULL" then
+    return col_q .. " IS NOT NULL"
+  end
+
+  -- Helper: quote a single user-supplied string value.
+  -- Numeric strings pass through raw; everything else gets single-quoted with escaping.
+  local function quote_user_val(v)
+    if tonumber(v) then
+      return v  -- raw numeric string, e.g. "42", "3.14", "-1"
+    end
+    return "'" .. tostring(v):gsub("'", "''") .. "'"
+  end
+
+  -- IN: parse comma-separated list, quote each part
+  if op == "IN" then
+    local parts = {}
+    for item in tostring(value):gmatch("[^,]+") do
+      -- Trim surrounding whitespace
+      local trimmed = item:match("^%s*(.-)%s*$")
+      table.insert(parts, quote_user_val(trimmed))
+    end
+    return col_q .. " IN (" .. table.concat(parts, ",") .. ")"
+  end
+
+  -- =, !=, >, <, LIKE — single value
+  return col_q .. " " .. op .. " " .. quote_user_val(tostring(value or ""))
+end
+
 --- Quick-filter: "column = value" or "column IS NULL".
 function M.quick_filter(spec, column, value)
   local clause

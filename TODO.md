@@ -6,6 +6,7 @@
 - v2.6: Sidebar nav (`go`/`gb`), pickers (`gh`/`gc`/`gt`), wide table scroll, tab nav `1-5`.
 - v2.7: `--write`/`--watch` file modes, password masking, `gn` null filter, `gV` DDL float, `gi`/`gI` alignment, `:GripStart` + Softrear Portal demo.
 - v2.8: SafeState cursor after edit, Chonk welcome screen (`;`), block-centered art float.
+- v2.9: Column filter builder (`gF`, operators =,!=,>,<,LIKE,IN,IS NULL), JSON auto-pretty-print in `K` row view and `i`/`<CR>` editor, export to file (`gX`/`:GripExport`, csv/json/sql).
 
 Full history: `git log --oneline`.
 
@@ -29,6 +30,10 @@ release. Roughly ordered by expected impact.
 - [ ] Generate sync SQL from diff (make table A match table B, emit INSERT/UPDATE/DELETE migration from `gD` output)
 - [ ] Import from clipboard/pipe (`gI` in empty grid or `:GripImport`, detect CSV/JSON/TSV, preview before INSERT, map columns)
 - [ ] Row duplication keymap (`yy`-style: duplicate current row as new INSERT with PK cleared)
+- [x] Sort by column (`s`/`S` cycle ASC/DESC/none, stacked sorts with indicators) -- v2.7
+- [x] Column filter builder (`gF`: pick column, operator =/</>LIKE/IN/NOT NULL, value, appends WHERE clause) -- v2.9
+- [x] JSON cell navigator (K row view auto-expands, i/CR pre-fills editor with formatted JSON) -- v2.9
+- [x] Export to file (`:GripExport csv|json|sql` dumps current result set to disk, not just clipboard) -- v2.9
 
 ### High Value -- Adapters
 - [ ] MSSQL adapter (sqlcmd CLI, `mssql://` scheme, sys.tables/sys.columns metadata, SET STATISTICS for explain, TOP N pagination, `##temp` table support)
@@ -38,8 +43,10 @@ release. Roughly ordered by expected impact.
 ### Medium Value
 - [ ] Column reordering via keymap (`<` / `>` to shift column left/right)
 - [ ] Inline column resize with `+`/`-` on header row
-- [ ] Export to clipboard as markdown table (`gy` for GFM pipe table)
+- [x] Export to clipboard as markdown table (`gy` for GFM pipe table) -- v2.6
 - [ ] Bookmarked rows (mark interesting rows with `m`, recall with `'`, persist per table in `.grip/bookmarks.json`)
+- [ ] Multi-row selection for bulk ops (visual `V`-mode selects rows, then `d`=bulk DELETE, `gy`=copy all as table)
+- [ ] Column visibility toggle (`-` hides current column, `+` restores, persists per-session in `.grip/`)
 - [ ] Quick data generation (`:GripFill` to populate empty table with N rows of realistic fake data per column type)
 
 ### Exploration

@@ -111,7 +111,8 @@ An example database is included. `:GripStart` opens it. Seventeen tables. Someth
 - **Conditional formatting** that colors negatives red, booleans green/red, past dates dim, and URLs underlined.
 - **Column hide/show** using `-` to hide, `g-` to restore all, and `gH` for a visibility picker.
 - **Smart column auto-fit** that distributes extra terminal width to truncated columns.
-- **Export** in 6 formats via `gE`: CSV, TSV, JSON, SQL INSERT, Markdown, and Grip Table (box-drawing).
+- **Export to clipboard** in 6 formats via `gE`: CSV, TSV, JSON, SQL INSERT, Markdown, and Grip Table (box-drawing).
+- **Export to file** via `gX` or `:GripExport`: saves the current result set as CSV, JSON, or SQL INSERT statements.
 
 ### Multi-Database
 - **PostgreSQL, SQLite, MySQL/MariaDB, and DuckDB** adapters with adapter-specific metadata queries.
@@ -147,7 +148,8 @@ Active modes show as a colored badge in the grid's winbar: red `✎ WRITE` and b
 - **DBUI integration** via `open_smart()` is optional since grip works standalone.
 - **Live SQL floating preview** via `gl` shows real-time SQL as you stage changes.
 - **Column type annotations** via `T` overlays type info on headers.
-- **Row view transpose** via `K` shows a vertical column-by-column view of the current row.
+- **Row view transpose** via `K` shows a vertical column-by-column view of the current row. JSON cells are automatically pretty-printed inline.
+- **JSON-aware editing**: pressing `i`/`<CR>` on a JSON cell pre-fills the editor with formatted, indented JSON for easy inspection and editing.
 
 ## Keybindings
 
@@ -212,6 +214,7 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `gp` | Load saved filter preset |
 | `gP` | Save current filter as preset |
 | `gn` | Filter: column IS NULL |
+| `gF` | Filter builder (=, !=, >, <, LIKE, IN, IS NULL/NOT NULL) |
 | `X` | Reset view (clear sort/filter/page) |
 | `H` / `L` | Previous / next page |
 | `]p` / `[p` | Previous / next page (alternate) |
@@ -252,7 +255,8 @@ Keys `2`–`9` also work in the schema sidebar to open any table directly in the
 | `gx` | Query Doctor (plain-English EXPLAIN) |
 | `gD` | Diff against another table |
 | `gv` | Toggle compact/wide diff layout |
-| `gE` | Export table (CSV, TSV, JSON, SQL INSERT, Markdown, Grip Table) |
+| `gE` | Export to clipboard (CSV, TSV, JSON, SQL INSERT, Markdown, Grip Table) |
+| `gX` | Export to file (csv/json/sql) — also `:GripExport` |
 
 ### Inspection
 

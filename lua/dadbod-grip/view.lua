@@ -1097,6 +1097,221 @@ function M.open(state, url, query_sql, opts)
   return bufnr
 end
 
+-- ── JSON pretty-printer ──────────────────────────────────────────────────
+-- Converts a decoded Lua value (from vim.fn.json_decode) into an indented
+-- line table suitable for display floats and editor pre-fill.
+-- Max depth = 8. Returns nil for nil input.
+local MAX_JSON_DEPTH = 8
+local function json_to_lines(decoded, indent, depth)
+  indent = indent or ""
+  depth  = depth  or 0
+
+  if decoded == nil then return nil end
+
+  local t = type(decoded)
+
+  -- Scalars
+  if t == "string" then return { '"' .. decoded:gsub('"', '\\"') .. '"' } end
+  if t == "number" then return { tostring(decoded) } end
+  if t == "boolean" then return { decoded and "true" or "false" } end
+
+  -- Depth guard
+  if depth >= MAX_JSON_DEPTH then return { "..." } end
+
+  local child_indent = indent .. "  "
+
+  -- Detect array vs object: arrays have sequential integer keys 1..n
+  local is_array = false
+  local n = 0
+  if t == "table" then
+    n = #decoded
+    if n > 0 then
+      is_array = true
+      for i = 1, n do
+        if decoded[i] == nil then is_array = false; break end
+      end
+    end
+  end
+
+  local lines = {}
+
+  if is_array then
+    table.insert(lines, "[")
+    for i = 1, n do
+      local child_lines = json_to_lines(decoded[i], child_indent, depth + 1)
+      if child_lines and #child_lines > 0 then
+        -- First line gets indent; subsequent lines appended
+        local first = child_indent .. child_lines[1]
+        local suffix = (i < n) and "," or ""
+        if #child_lines == 1 then
+          table.insert(lines, first .. suffix)
+        else
+          table.insert(lines, first)
+          for j = 2, #child_lines - 1 do
+            table.insert(lines, child_indent .. child_lines[j])
+          end
+          table.insert(lines, child_indent .. child_lines[#child_lines] .. suffix)
+        end
+      end
+    end
+    table.insert(lines, indent .. "]")
+  else
+    -- Object — sort keys for deterministic output
+    table.insert(lines, "{")
+    local keys = {}
+    for k in pairs(decoded) do table.insert(keys, k) end
+    table.sort(keys)
+    for ki, k in ipairs(keys) do
+      local child_lines = json_to_lines(decoded[k], child_indent, depth + 1)
+      if child_lines and #child_lines > 0 then
+        local key_prefix = child_indent .. '"' .. tostring(k):gsub('"', '\\"') .. '": '
+        local suffix = (ki < #keys) and "," or ""
+        if #child_lines == 1 then
+          table.insert(lines, key_prefix .. child_lines[1] .. suffix)
+        else
+          table.insert(lines, key_prefix .. child_lines[1])
+          for j = 2, #child_lines - 1 do
+            table.insert(lines, child_indent .. child_lines[j])
+          end
+          table.insert(lines, child_indent .. child_lines[#child_lines] .. suffix)
+        end
+      end
+    end
+    table.insert(lines, indent .. "}")
+  end
+
+  return lines
+end
+
+-- Expose for testing
+M._json_to_lines = json_to_lines
+
+-- ── export formatter ─────────────────────────────────────────────────────
+-- Pure function: rows is list-of-list (parallel to cols).
+-- nil values represent SQL NULL.
+-- Returns a list of strings (lines), one per output line.
+local function format_export(rows, cols, format, table_name)
+  local tbl = table_name or "_grip_result"
+
+  if format == "csv" then
+    local lines = { table.concat(cols, ",") }
+    for _, row in ipairs(rows) do
+      local parts = {}
+      for ci = 1, #cols do
+        local v = row[ci]
+        local s = v or ""
+        if tostring(s):find('[,"\n]') then
+          s = '"' .. tostring(s):gsub('"', '""') .. '"'
+        end
+        table.insert(parts, tostring(s))
+      end
+      table.insert(lines, table.concat(parts, ","))
+    end
+    return lines
+
+  elseif format == "json" then
+    local objects = {}
+    for _, row in ipairs(rows) do
+      local obj_parts = {}
+      for ci, col in ipairs(cols) do
+        local v = row[ci]  -- may be nil
+        local json_val
+        if v == nil then
+          json_val = "null"
+        elseif tonumber(v) then
+          json_val = tostring(v)
+        elseif v == "true" or v == "false" then
+          json_val = v
+        else
+          json_val = '"' .. tostring(v):gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n'):gsub('\r', '\\r'):gsub('\t', '\\t') .. '"'
+        end
+        table.insert(obj_parts, '    "' .. col .. '": ' .. json_val)
+      end
+      table.insert(objects, "  {\n" .. table.concat(obj_parts, ",\n") .. "\n  }")
+    end
+    local lines = {}
+    local json_str = "[\n" .. table.concat(objects, ",\n") .. "\n]"
+    for _, l in ipairs(vim.split(json_str, "\n", { plain = true })) do
+      table.insert(lines, l)
+    end
+    return lines
+
+  elseif format == "sql" then
+    local sql_mod = require("dadbod-grip.sql")
+    local col_list = table.concat(
+      vim.tbl_map(function(c) return sql_mod.quote_ident(c) end, cols), ", ")
+    local lines = {}
+    for _, row in ipairs(rows) do
+      local vals = {}
+      for ci = 1, #cols do
+        local v = row[ci]
+        if v == nil then
+          table.insert(vals, "NULL")
+        else
+          table.insert(vals, "'" .. tostring(v):gsub("'", "''") .. "'")
+        end
+      end
+      table.insert(lines, string.format(
+        "INSERT INTO %s (%s) VALUES (%s);",
+        sql_mod.quote_ident(tbl), col_list, table.concat(vals, ", ")))
+    end
+    return lines
+  end
+
+  return {}
+end
+
+-- Expose for testing
+M._format_export = format_export
+
+--- Export current result set to a file.
+--- Called by gX keymap and :GripExport command.
+function M.do_export(bufnr)
+  local s = M._sessions[bufnr]
+  if not s or not s.state then
+    vim.notify("No grip result to export", vim.log.levels.WARN)
+    return
+  end
+  local rows = s.state.rows
+  local cols = s.state.columns
+  if not rows or #rows == 0 then
+    vim.notify("No rows to export", vim.log.levels.WARN)
+    return
+  end
+
+  local CANCEL = "\0"
+  -- Prompt format
+  local ok_fmt, fmt = pcall(vim.fn.input, {
+    prompt = "Export format [csv/json/sql]: ",
+    cancelreturn = CANCEL,
+  })
+  if not ok_fmt or fmt == CANCEL or fmt == "" then return end
+  fmt = fmt:lower()
+  if fmt ~= "csv" and fmt ~= "json" and fmt ~= "sql" then
+    vim.notify("Unknown format: " .. fmt .. " (use csv, json, or sql)", vim.log.levels.ERROR)
+    return
+  end
+
+  local ext = fmt == "sql" and "sql" or fmt
+  local default_path = vim.fn.expand("%:p:h") .. "/grip_export." .. ext
+  local ok_path, path = pcall(vim.fn.input, {
+    prompt = "Save to: ",
+    default = default_path,
+    cancelreturn = CANCEL,
+    completion = "file",
+  })
+  if not ok_path or path == CANCEL or path == "" then return end
+
+  local table_name = s.query_spec and s.query_spec.table_name
+  local lines = format_export(rows, cols, fmt, table_name)
+  local write_ok, err = pcall(vim.fn.writefile, lines, path)
+  if write_ok then
+    vim.notify(string.format("Exported %d rows → %s", #rows, path), vim.log.levels.INFO)
+  else
+    vim.notify("Export failed: " .. tostring(err), vim.log.levels.ERROR)
+  end
+end
+
 -- ── focused info float helper ────────────────────────────────────────────
 -- Opens a focused float with q/Esc to close. Caller stays in grip buffer.
 local function open_info_float(grip_win, lines, float_opts)
@@ -2234,9 +2449,25 @@ function M._setup_keymaps(bufnr)
     local lines = {}
     for _, col in ipairs(st.columns) do
       local val = data.effective_value(st, cell.row_idx, col)
-      local display_val = val and val:gsub("\n", "↵"):gsub("\r", "") or "NULL"
       local pad = string.rep(" ", max_name_w - vim.fn.strdisplaywidth(col))
-      table.insert(lines, " " .. col .. pad .. "   " .. display_val)
+      local prefix = " " .. col .. pad .. "   "
+      -- JSON-aware display: try to pretty-print JSON/jsonb values
+      local json_ok, json_decoded = val and pcall(vim.fn.json_decode, val) or false, nil
+      if json_ok then json_decoded = vim.fn.json_decode(val) end
+      if json_ok and type(json_decoded) == "table" then
+        local json_lines = json_to_lines(json_decoded)
+        if json_lines and #json_lines > 0 then
+          table.insert(lines, prefix .. json_lines[1])
+          for ji = 2, #json_lines do
+            table.insert(lines, string.rep(" ", #prefix) .. json_lines[ji])
+          end
+        else
+          table.insert(lines, prefix .. (val or "NULL"))
+        end
+      else
+        local display_val = val and val:gsub("\n", "↵"):gsub("\r", "") or "NULL"
+        table.insert(lines, prefix .. display_val)
+      end
     end
     local grip_win = vim.api.nvim_get_current_win()
     local _, popup_buf = open_info_float(grip_win, lines, {
@@ -3000,6 +3231,66 @@ function M._setup_keymaps(bufnr)
     if session_n.on_requery then session_n.on_requery(bufnr, new_spec) end
     vim.notify(col_name .. " IS NULL", vim.log.levels.INFO)
   end, "Filter: column IS NULL")
+
+  -- gF: interactive filter builder (=, !=, >, <, LIKE, IN, NULL, NOT NULL)
+  map("gF", function()
+    local session_gF = M._sessions[bufnr]
+    if not session_gF or not session_gF.query_spec then return end
+
+    -- Resolve column name from cursor (data row or header/type row)
+    local col_name
+    local cell = M.get_cell(bufnr)
+    if cell then
+      col_name = cell.col_name
+    else
+      local r = session_gF._render
+      if r then
+        local col_nr = vim.api.nvim_win_get_cursor(0)[2]
+        local cols = r.visible_columns or session_gF.state.columns
+        if r.hdr_byte_positions then
+          local snapped = M._snap_col(cols, r.hdr_byte_positions, col_nr)
+          if snapped then col_name = snapped.col_name end
+        end
+      end
+    end
+    if not col_name then
+      vim.notify("Move cursor to a column first", vim.log.levels.INFO)
+      return
+    end
+
+    if not confirm_discard_changes("Filter") then return end
+
+    local CANCEL = "\0"
+    local ok, op = pcall(vim.fn.input, {
+      prompt = "Filter " .. col_name .. " [=, !=, >, <, LIKE, IN, NULL, NOT NULL]: ",
+      cancelreturn = CANCEL,
+    })
+    if not ok or op == CANCEL or op == "" then return end
+    op = op:upper():match("^%s*(.-)%s*$")  -- trim + uppercase
+
+    local value
+    if op ~= "NULL" and op ~= "NOT NULL" then
+      local ok2, val = pcall(vim.fn.input, { prompt = "Value: ", cancelreturn = CANCEL })
+      if not ok2 or val == CANCEL then return end
+      value = val
+    end
+
+    local ok3, clause = pcall(qmod.build_filter_clause, col_name, op, value)
+    if not ok3 then
+      vim.notify("Invalid filter: " .. tostring(clause), vim.log.levels.WARN)
+      return
+    end
+
+    local new_spec = qmod.add_filter(session_gF.query_spec, clause)
+    if session_gF.on_requery then session_gF.on_requery(bufnr, new_spec) end
+    local display = op == "NULL" or op == "NOT NULL"
+      and (col_name .. " IS " .. (op == "NULL" and "" or "NOT ") .. "NULL")
+      or (col_name .. " " .. op .. " " .. tostring(value or ""))
+    vim.notify("Filtered: " .. display:sub(1, 60) .. "  (F to clear)", vim.log.levels.INFO)
+  end, "Filter builder (=, !=, >, <, LIKE, IN, NULL)")
+
+  -- gX: export result set to file (csv/json/sql)
+  map("gX", function() M.do_export(bufnr) end, "Export to file (csv/json/sql)")
 
   -- gp: load a saved filter preset
   map("gp", function()
@@ -3965,8 +4256,8 @@ function M.show_help(opts)
       "  $         Last column",
       "  e         Next column, land at end of cell",
       "  {/}       Prev / next modified row",
-      "  <CR> / i  Edit cell under cursor",
-      "  K         Row view (vertical transpose)",
+      "  <CR> / i  Edit cell under cursor (JSON cells: pretty-printed in editor)",
+      "  K         Row view (vertical transpose; JSON cells auto-expanded)",
       "  y         Yank cell value to clipboard",
       "  Y         Yank row as CSV",
       "  gY        Yank entire table as CSV",
@@ -3977,6 +4268,7 @@ function M.show_help(opts)
       "  S         Stack sort on column (stackable: press S on multiple cols for ▲1 ▼2 ▲3)",
       "  f         Quick filter by cell value",
       "  gn        Filter: column IS NULL",
+      "  gF        Filter builder (=, !=, >, <, LIKE, IN, IS NULL)",
       "  <C-f>     Freeform WHERE clause filter",
       "            ↳ e.g.: status = 'active'",
       "            ↳ e.g.: created_at > '2024-01-01' AND amount > 100",
@@ -4001,7 +4293,8 @@ function M.show_help(opts)
       "  gV        Show CREATE TABLE DDL",
       "  gx        Explain current query plan",
       "  gD        Diff against another table",
-      "  gE        Export (CSV, TSV, JSON, SQL, Markdown, Grip Table)",
+      "  gE        Export to clipboard (CSV, TSV, JSON, SQL, Markdown)",
+      "  gX        Export to file (csv/json/sql)  :GripExport",
       "",
       "  Tab Views (1-9)",
       "  1         Table picker",
