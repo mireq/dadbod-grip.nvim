@@ -193,11 +193,22 @@ function M.list()
   return all
 end
 
+--- Strip session-only flags from a URL before persisting.
+--- --write / --watch / --watch=Ns must never reach connections.json.
+local function strip_flags(url)
+  if not url then return url end
+  url = url:gsub("%s*%-%-write%s*", " ")
+  url = url:gsub("%s*%-%-watch=%d+s?%s*", " ")
+  url = url:gsub("%s*%-%-watch%s*", " ")
+  return vim.trim(url)
+end
+
 --- Add a connection to .grip/connections.json.
 function M.add(name, url)
+  local clean_url = strip_flags(url)
   local conns = read_file_connections()
-  local conn_type = is_file_url(url) and "file" or nil
-  table.insert(conns, { name = name, url = url, type = conn_type })
+  local conn_type = is_file_url(clean_url) and "file" or nil
+  table.insert(conns, { name = name, url = clean_url, type = conn_type })
   write_file_connections(conns)
 end
 
@@ -218,6 +229,8 @@ end
 --- Auto-saves to .grip/connections.json if not already persisted.
 --- opts: { write = bool, watch_ms = number } — session-only, never persisted.
 function M.switch(url, name, conn_type, opts)
+  -- Strip session-only flags — they must never reach the connection registry
+  url = strip_flags(url)
   -- Resolve type: param > stored connections > auto-detect
   local file_conns = read_file_connections()
   local resolved_type = conn_type

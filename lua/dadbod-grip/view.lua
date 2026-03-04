@@ -2439,12 +2439,36 @@ function M._setup_keymaps(bufnr)
   map("=", function()
     local session = M._sessions[bufnr]
     if not session then return end
+    -- Try data row first; fall back to header/type row byte positions so = works
+    -- from the header (natural UX: look at truncated header, press =)
     local cell = M.get_cell(bufnr)
-    if not cell then
+    local col
+    if cell then
+      col = cell.col_name
+    else
+      local r = session._render
+      if r then
+        local col_nr = vim.api.nvim_win_get_cursor(0)[2]
+        local vis_cols = r.visible_columns or (session.state and session.state.columns) or {}
+        local bp = r.hdr_byte_positions
+        if bp then
+          for _, c in ipairs(vis_cols) do
+            local pos = bp[c]
+            if pos and col_nr >= pos.start and col_nr <= pos.finish then
+              col = c; break
+            end
+          end
+          if not col then
+            local snap = M._snap_col(vis_cols, bp, col_nr)
+            if snap then col = snap.col_name end
+          end
+        end
+      end
+    end
+    if not col then
       vim.notify("Move cursor to a column to resize", vim.log.levels.INFO)
       return
     end
-    local col = cell.col_name
     if not session.col_width_overrides then session.col_width_overrides = {} end
     if session.col_width_overrides[col] then
       -- Reset to default width

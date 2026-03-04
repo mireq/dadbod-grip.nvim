@@ -65,6 +65,57 @@ dev-httpfs: seed-httpfs
 dev-sqlite: seed-sqlite
     nvim --cmd "set rtp^=." -c "let g:db='sqlite:tests/seed_sqlite.db'"
 
+# ── Watch / Write mode test fixtures ─────────────────────────────────────────
+
+# Create a local CSV that grows by one row every 4 seconds (for --watch testing).
+# Run this in a separate terminal, then in Neovim: :Grip /tmp/grip_watch.csv --watch
+watch-fixture:
+    #!/usr/bin/env bash
+    FILE=/tmp/grip_watch.csv
+    echo "id,name,score,ts" > "$FILE"
+    echo "1,alice,90,$(date -u +%H:%M:%S)" >> "$FILE"
+    echo "2,bob,75,$(date -u +%H:%M:%S)"   >> "$FILE"
+    echo "Watching: appending to $FILE every 4s — Ctrl-C to stop"
+    N=3
+    while true; do
+        sleep 4
+        echo "$N,user_$N,$((RANDOM % 100)),$(date -u +%H:%M:%S)" >> "$FILE"
+        echo "  row $N appended ($(wc -l < "$FILE") rows total)"
+        N=$((N + 1))
+    done
+
+# Create a writable CSV for --write testing.
+# Then in Neovim: :Grip /tmp/grip_write.csv --write
+write-fixture:
+    #!/usr/bin/env bash
+    FILE=/tmp/grip_write.csv
+    printf 'id,first_name,last_name,score,active\n' > "$FILE"
+    printf '1,alice,smith,88,true\n'  >> "$FILE"
+    printf '2,bob,jones,74,true\n'    >> "$FILE"
+    printf '3,carol,white,95,false\n' >> "$FILE"
+    printf '4,dave,black,61,true\n'   >> "$FILE"
+    printf '5,eve,grey,82,false\n'    >> "$FILE"
+    echo "Write fixture ready: $FILE"
+    echo "In Neovim: :Grip /tmp/grip_write.csv --write"
+
+# Create a Parquet fixture for --write testing (requires DuckDB).
+write-fixture-parquet:
+    duckdb -c "COPY (SELECT i AS id, 'user_'||i AS name, (random()*100)::int AS score FROM range(1,11) t(i)) TO '/tmp/grip_write.parquet' (FORMAT PARQUET)"
+    echo "Parquet fixture ready: /tmp/grip_write.parquet"
+    echo "In Neovim: :Grip /tmp/grip_write.parquet --write"
+
+# Open Neovim ready to test --watch (fixture must be running in another terminal)
+dev-watch: seed-httpfs
+    nvim --cmd "set rtp^=." -c "Grip /tmp/grip_watch.csv --watch"
+
+# Open Neovim ready to test --write on CSV
+dev-write: write-fixture
+    nvim --cmd "set rtp^=." -c "Grip /tmp/grip_write.csv --write"
+
+# Open Neovim ready to test --write on Parquet
+dev-write-parquet: write-fixture-parquet
+    nvim --cmd "set rtp^=." -c "Grip /tmp/grip_write.parquet --write"
+
 # Show git log for the current feature branch
 log:
     git log --oneline --graph -20
