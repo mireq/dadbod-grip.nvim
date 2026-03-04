@@ -4048,12 +4048,13 @@ function M.show_help(opts)
         " └──────────────────────────────────────────┘",
         "",
         "  Connections",
-        "  Softrear Inc. Analyst Portal\xe2\x84\xa2   :GripStart   Built-in case file (see docs/softrear-internal.md)",
+        "  Softrear Inc. Analyst Portal\xe2\x84\xa2",
+        "  :GripStart   Built-in case file (see docs/softrear-internal.md)",
         "",
         " ───────────────────────────────────────────",
         "",
         "  ╔═╦═╦═╗",
-        '  ║d║b║g║  ᕦ( ᐛ )ᕤ  dadbod-grip v' .. VERSION,
+        '  ║d║b║g║  dadbod-grip v' .. VERSION,
         "  ╚═╩═╩═╝",
       })
     else
@@ -4095,12 +4096,13 @@ function M.show_help(opts)
         "          past-date=dim  url=underline",
         "",
         "  Connections",
-        "  Softrear Inc. Analyst Portal\xe2\x84\xa2   :GripStart   Built-in case file (see docs/softrear-internal.md)",
+        "  Softrear Inc. Analyst Portal\xe2\x84\xa2",
+        "  :GripStart   Built-in case file (see docs/softrear-internal.md)",
         "",
         " ───────────────────────────────────────────",
         "",
         "  ╔═╦═╦═╗",
-        '  ║d║b║g║  ᕦ( ᐛ )ᕤ  dadbod-grip v' .. VERSION,
+        '  ║d║b║g║  dadbod-grip v' .. VERSION,
         "  ╚═╩═╩═╝",
       })
     end
@@ -4109,6 +4111,32 @@ function M.show_help(opts)
     max_w = math.max(max_w + 2, 46)
     local popup_buf = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_buf_set_lines(popup_buf, 0, -1, false, help)
+    -- Full help highlights: logo, section headers, keymap keys, separators, RO box, portal
+    local ns_h = vim.api.nvim_create_namespace("grip_help_hl")
+    local function hadd(ln, group, s, e)
+      vim.api.nvim_buf_add_highlight(popup_buf, ns_h, group, ln, s or 0, e or -1)
+    end
+    local in_ro_box = false
+    for i, line in ipairs(help) do
+      local ln = i - 1
+      if    line:match("^    %a") then                                           hadd(ln, "Special")
+      elseif line:find("╔═╦") or line:find("║d║") or line:find("╚═╩") then     hadd(ln, "Special")
+      elseif line:find("┌─") then    in_ro_box = true;  hadd(ln, "DiagnosticWarn")
+      elseif in_ro_box then          hadd(ln, "DiagnosticWarn"); if line:find("└──") then in_ro_box = false end
+      elseif line:match("^%s+[─═]") then hadd(ln, "Comment")
+      elseif line:find("\xe2\x86\xb3") then hadd(ln, "Comment")   -- ↳ continuation
+      elseif line:find("Colors:")    then hadd(ln, "Comment")
+      elseif line:find("Softrear Inc. Analyst Portal", 1, true) then hadd(ln, "Special")
+      elseif line:find(":GripStart", 1, true) then
+        local s, e = line:find(":GripStart")
+        if s then hadd(ln, "Statement", s - 1, e) end
+        if e then hadd(ln, "Comment",   e, -1) end
+      elseif line:match("^  %S") and not line:find("%s%s", 3) then  hadd(ln, "Title")
+      elseif line:match("^  %S") then
+        local key_end = line:find("%s%s", 3)
+        if key_end then hadd(ln, "Identifier", 2, key_end - 1) end
+      end
+    end
     local win = vim.api.nvim_open_win(popup_buf, true, {
       relative = "editor",
       row = math.floor((vim.o.lines - #help) / 2),

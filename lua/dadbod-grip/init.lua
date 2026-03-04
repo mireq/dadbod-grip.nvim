@@ -437,33 +437,30 @@ local function do_edit(bufnr, cell, url)
     local new_state = data.add_change(session.state, cell.row_idx, cell.col_name, actual_val)
     view.apply_edit(bufnr, new_state)
 
-    -- After render, advance cursor to next row at the same column (spreadsheet-style).
-    -- vim.schedule fires after render's synchronous cursor-restore AND editor.lua's
-    -- restore_caller schedule, so we set the definitive final cursor position here.
-    vim.schedule(function()
-      local s = view._sessions[bufnr]
-      if not s or not s._render then return end
-      local r = s._render
-      local win = vim.fn.bufwinid(bufnr)
-      if win == -1 then return end
-      local ds = r.data_start or 4
-      local ordered = r.ordered
-      if not ordered or #ordered == 0 then return end
-      -- Find the order-index of the edited row in the new render
-      local edit_order
-      for i, ri in ipairs(ordered) do
-        if ri == edited_row_idx then edit_order = i; break end
+    -- Advance cursor to next row / same column (spreadsheet-style).
+    -- view.apply_edit() sets session._render with fresh byte_positions synchronously.
+    local s = view._sessions[bufnr]
+    local pos = s and s._render and M._next_edit_cursor(s._render, edited_row_idx, edited_col)
+    if pos then
+      local w = vim.fn.bufwinid(bufnr)
+      if w ~= -1 then
+        -- Sync set: immediate, handles the no-interference case with zero latency.
+        pcall(vim.api.nvim_win_set_cursor, w, { pos.line, pos.col })
       end
-      if not edit_order then return end
-      -- Advance one row (stay on last if already there)
-      local next_order = math.min(edit_order + 1, #ordered)
-      local next_line  = ds + next_order - 1
-      -- Use the exact column start byte from the new render (avoids width-shift "left one" bug)
-      local bp     = r.byte_positions and r.byte_positions[next_order]
-      local col_bp = bp and bp[edited_col]
-      local byte_col = col_bp and col_bp.start or vim.api.nvim_win_get_cursor(win)[2]
-      pcall(vim.api.nvim_win_set_cursor, win, { next_line, byte_col })
-    end)
+      -- SafeState fires after ALL pending events are exhausted (after any depth of
+      -- WinEnter→vim.schedule restore chains from external plugins).  once=true
+      -- auto-removes the autocmd so it cannot fire again on the next user action.
+      local p_line, p_col = pos.line, pos.col
+      vim.api.nvim_create_autocmd("SafeState", {
+        once = true,
+        callback = function()
+          local w2 = vim.fn.bufwinid(bufnr)
+          if w2 ~= -1 then
+            pcall(vim.api.nvim_win_set_cursor, w2, { p_line, p_col })
+          end
+        end,
+      })
+    end
   end)
 end
 
@@ -1304,17 +1301,29 @@ function M.open_welcome()
       "",
     }
     local sbuf = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_buf_set_lines(sbuf, 0, -1, false, secret)
-    local sw = 48
-    local sh = #secret
-    local ww = vim.api.nvim_win_get_width(0)
-    local wh = vim.api.nvim_win_get_height(0)
+    -- Center the art as a block: all lines share the same left offset based
+    -- on the widest line.  Per-line centering causes shorter lines (like
+    -- "q to close") to drift right and misalign with the frame.
+    -- · (U+00B7) and ∿ (U+223F) are ambiguous-width; floor of 40 pads for
+    -- terminals that render them as 2-wide while ambiwidth=single counts 1.
+    local max_lw = 0
+    for _, l in ipairs(secret) do
+      max_lw = math.max(max_lw, vim.fn.strdisplaywidth(l))
+    end
+    local sw      = math.max(max_lw, 40)
+    local base_pad = math.max(0, math.floor((sw - max_lw) / 2))
+    local lines = {}
+    for _, l in ipairs(secret) do
+      table.insert(lines, string.rep(" ", base_pad) .. l)
+    end
+    vim.api.nvim_buf_set_lines(sbuf, 0, -1, false, lines)
+    local sh   = #lines
     local swin = vim.api.nvim_open_win(sbuf, true, {
-      relative = "win",
+      relative = "editor",
       width    = sw,
       height   = sh,
-      row      = math.max(0, math.floor((wh - sh) / 2)),
-      col      = math.max(0, math.floor((ww - sw) / 2)),
+      row      = math.floor((vim.o.lines   - sh - 4) / 2),
+      col      = math.floor((vim.o.columns - sw - 2) / 2),
       style    = "minimal",
       border   = "rounded",
       zindex   = 60,
@@ -2027,5 +2036,24 @@ end
 -- Exposed for testing
 M._is_queryable_file = is_queryable_file
 M._resolve_query = resolve_query
+
+--- Compute where the cursor should land after editing a cell (spreadsheet-style advance).
+--- Returns {line, col} (1-indexed line, 0-indexed byte col) or nil if position cannot be
+--- determined. Always uses the NEXT row's byte_positions, never the current cursor offset.
+function M._next_edit_cursor(r, edited_row_idx, edited_col)
+  local ordered = r.ordered
+  if not ordered or #ordered == 0 then return nil end
+  local edit_order
+  for i, ri in ipairs(ordered) do
+    if ri == edited_row_idx then edit_order = i; break end
+  end
+  if not edit_order then return nil end
+  local next_order = math.min(edit_order + 1, #ordered)
+  local next_line  = (r.data_start or 4) + next_order - 1
+  local bp     = r.byte_positions and r.byte_positions[next_order]
+  local col_bp = bp and bp[edited_col]
+  if not col_bp then return nil end
+  return { line = next_line, col = col_bp.start }
+end
 
 return M

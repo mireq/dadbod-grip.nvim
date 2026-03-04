@@ -797,7 +797,7 @@ local function setup_keymaps(url)
       " ─────────────────────────────────────────",
       "",
       "  ╔═╦═╦═╗",
-      "  ║d║b║g║  ᕦ( ᐛ )ᕤ  dadbod-grip v" .. VERSION,
+      "  ║d║b║g║  dadbod-grip v" .. VERSION,
       "  ╚═╩═╩═╝",
       "",
     }
@@ -807,6 +807,23 @@ local function setup_keymaps(url)
     max_w = math.max(max_w + 2, 44)
     local popup_buf = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_buf_set_lines(popup_buf, 0, -1, false, lines)
+    -- Full schema help highlights
+    local ns_sh = vim.api.nvim_create_namespace("grip_schema_help_hl")
+    local function sadd(ln, group, s, e)
+      vim.api.nvim_buf_add_highlight(popup_buf, ns_sh, group, ln, s or 0, e or -1)
+    end
+    for i, line in ipairs(lines) do
+      local ln = i - 1
+      if    line:match("^    %a") then                                           sadd(ln, "Special")
+      elseif line:find("╔═╦") or line:find("║d║") or line:find("╚═╩") then     sadd(ln, "Special")
+      elseif line:match("^%s+[─═]") then sadd(ln, "Comment")
+      elseif line:find("\xe2\x86\xb3") then sadd(ln, "Comment")   -- ↳ continuation
+      elseif line:match("^  %S") and not line:find("%s%s", 3) then sadd(ln, "Title")
+      elseif line:match("^  %S") then
+        local key_end = line:find("%s%s", 3)
+        if key_end then sadd(ln, "Identifier", 2, key_end - 1) end
+      end
+    end
     local win = vim.api.nvim_open_win(popup_buf, true, {
       relative = "editor",
       row = math.floor((vim.o.lines - #lines) / 2),
