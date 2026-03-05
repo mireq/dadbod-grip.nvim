@@ -60,7 +60,7 @@
 | `S` | Add/toggle secondary sort (stacked: ▲1 ▼2 ▲3) |
 | `f` | Quick filter by cell value (= current value) |
 | `gn` | Filter: column IS NULL |
-| `gF` | **[NEW v2.9]** Filter builder (=, !=, >, <, LIKE, IN, IS NULL) |
+| `gF` | **[NEW v2.9]** Filter builder (=, !=, >, <, LIKE, IN, BETWEEN, NULL, NOT NULL) |
 | `<C-f>` | Freeform WHERE clause filter |
 | `F` | Clear all active filters |
 | `gp` | Load saved filter preset |
@@ -119,7 +119,8 @@
 ### Schema & Workflow
 | Key | Action |
 |-----|--------|
-| `go` / `gT` / `gt` | Pick table (floating picker) |
+| `go` | Open schema browser sidebar (focus / toggle) |
+| `gT` / `gt` | Pick table (floating picker) |
 | `gb` | Schema browser sidebar (toggle/focus) |
 | `gO` | Open as editable table (read-only → table) |
 | `gC` / `<C-g>` | Switch database connection |
@@ -151,7 +152,8 @@
 | `gh` | Query history → load into query pad |
 | `gC` / `gc` / `<C-g>` | Switch connection |
 | `?` | Show help |
-| `1-5` | Tab views (Records, Columns, Constraints, FK, Indexes) |
+| `1` | Table picker |
+| `2-9` | Same tab views as grid (2=Records, 3=History, 4=Stats, 5=Explain, 6=Columns, 7=FK, 8=Indexes, 9=Constraints) |
 
 ## Free `g` Keymaps (as of v2.9)
 

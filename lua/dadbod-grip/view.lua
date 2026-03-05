@@ -3299,7 +3299,7 @@ function M._setup_keymaps(bufnr)
     if op ~= "NULL" and op ~= "NOT NULL" then
       local value_prompt = op == "LIKE" and "Value (wildcards auto-added, or type %custom%): "
         or op == "IN" and "Values (comma-separated, e.g. 1,2,3 or alice,bob): "
-        or op == "BETWEEN" and "Range (low,high \xe2\x80\x94 e.g. 10,100 or 2024-01-01,2024-12-31): "
+        or op == "BETWEEN" and "Range (low,high, e.g. 10,100 or 2024-01-01,2024-12-31): "
         or "Value: "
       local ok2, val = pcall(vim.fn.input, { prompt = value_prompt, cancelreturn = CANCEL })
       if not ok2 or val == CANCEL then return end
