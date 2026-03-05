@@ -346,6 +346,8 @@ function M.switch(url, name, conn_type, opts)
   end
 
   vim.notify("Grip: connected to " .. (name or url), vim.log.levels.INFO)
+  -- Invalidate completion cache so the new connection's schema is fetched fresh.
+  require("dadbod-grip.completion").invalidate(url)
 
   vim.schedule(function()
     local schema = require("dadbod-grip.schema")

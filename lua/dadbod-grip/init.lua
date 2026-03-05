@@ -2045,6 +2045,7 @@ function M.setup(opts)
       return
     end
     connections.save_attachments(url, duckdb_adapter.get_attachments(url))
+    require("dadbod-grip.completion").invalidate(url)
     schema_mod.refresh(url)
     vim.notify(string.format("Attached '%s' as %s", dsn, alias))
   end, {
@@ -2084,6 +2085,7 @@ function M.setup(opts)
 
     duckdb_adapter.detach(url, alias)
     connections.save_attachments(url, duckdb_adapter.get_attachments(url))
+    require("dadbod-grip.completion").invalidate(url)
     schema_mod.refresh(url)
     vim.notify(string.format("Detached '%s'", alias))
   end, {

@@ -139,6 +139,7 @@
 | Key | Action |
 |-----|--------|
 | `<C-CR>` | Execute query |
+| `<C-x><C-o>` | SQL completion (tables, columns, federation-aware) |
 | `gA` | AI SQL generation |
 | `?` | Show help |
 | `q` | Close query pad |
