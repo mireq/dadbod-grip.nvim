@@ -21,6 +21,10 @@ local function ensure_buf(url)
   vim.bo[_pad_bufnr].filetype = "sql"
   vim.api.nvim_buf_set_name(_pad_bufnr, "grip://query")
   vim.b[_pad_bufnr].db = url
+  -- Native SQL completion via <C-x><C-o>. vim-dadbod-completion still works
+  -- for users who have it (b:db is set above). This omnifunc adds federation
+  -- awareness (alias.table.column after :GripAttach) that dadbod-completion lacks.
+  vim.bo[_pad_bufnr].omnifunc = "v:lua.require'dadbod-grip.completion'.omnifunc"
 
   -- Pre-fill with hint comment
   vim.api.nvim_buf_set_lines(_pad_bufnr, 0, -1, false, {
