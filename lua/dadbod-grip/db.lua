@@ -175,6 +175,24 @@ function M.list_tables(url)
   return adapter.list_tables(conn)
 end
 
+--- Fetch all table columns in a single batch query (adapter-specific optimisation).
+--- Returns { [table_name] = [{column_name, data_type, is_nullable}] } or nil.
+--- nil means the adapter doesn't support batch fetch; callers fall back to per-table.
+function M.get_schema_batch(url)
+  local adapter, conn, err = resolve(url)
+  if not adapter then return nil end
+  if not adapter.get_schema_batch then return nil end
+  return adapter.get_schema_batch(conn)
+end
+
+--- Async variant of get_schema_batch. Calls callback(tables) when done, or callback(nil) on error.
+--- No-op if the adapter doesn't support async batch fetch.
+function M.get_schema_batch_async(url, callback)
+  local adapter, conn, err = resolve(url)
+  if not adapter or not adapter.get_schema_batch_async then callback(nil); return end
+  adapter.get_schema_batch_async(conn, callback)
+end
+
 function M.get_indexes(table_name, url)
   local adapter, conn, err = resolve(url)
   if not adapter then return {}, err end

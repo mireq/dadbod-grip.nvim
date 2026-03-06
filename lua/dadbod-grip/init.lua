@@ -2133,6 +2133,10 @@ function M.setup(opts)
     connections.save_attachments(url, duckdb_adapter.get_attachments(url))
     require("dadbod-grip.completion").invalidate(url)
     schema_mod.refresh(url)
+    -- Pre-warm completion cache after manual attach (M.attach no longer does this).
+    vim.schedule(function()
+      pcall(function() require("dadbod-grip.completion").warm_schema(url) end)
+    end)
     vim.notify(string.format("Attached '%s' as %s", dsn, alias), vim.log.levels.INFO)
   end, {
     nargs = "*",

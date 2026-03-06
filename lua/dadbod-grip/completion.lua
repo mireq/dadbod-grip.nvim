@@ -25,15 +25,24 @@ function M.get_schema(url)
   end
 
   local db = require("dadbod-grip.db")
-  local result, err = db.list_tables(url)
-  if err or not result then return {} end
 
-  local tables = {}
-  for _, t in ipairs(result) do
-    local name = type(t) == "table" and (t.name or (t.rows and t.rows[1] and t.rows[1][1])) or t
-    if name and name ~= "" then
-      local cols, _ = db.get_column_info(name, url)
-      tables[name] = cols or {}
+  -- Prefer batch fetch (single CLI spawn for DuckDB federation).
+  -- Falls back to per-table when adapter doesn't support it.
+  local tables
+  if db.get_schema_batch then
+    tables = db.get_schema_batch(url)
+  end
+
+  if not tables then
+    local result, err = db.list_tables(url)
+    if err or not result then return {} end
+    tables = {}
+    for _, t in ipairs(result) do
+      local name = type(t) == "table" and (t.name or (t.rows and t.rows[1] and t.rows[1][1])) or t
+      if name and name ~= "" then
+        local cols, _ = db.get_column_info(name, url)
+        tables[name] = cols or {}
+      end
     end
   end
 
@@ -51,6 +60,18 @@ function M.invalidate(url)
       _cache[k] = nil
     end
   end
+end
+
+--- Pre-warm the schema cache asynchronously so columns are ready before the first keypress.
+--- Called after connection switch and after GripAttach. No-op if adapter lacks async batch.
+function M.warm_schema(url)
+  local db = require("dadbod-grip.db")
+  if not db.get_schema_batch_async then return end
+  db.get_schema_batch_async(url, function(schema)
+    if schema then
+      _cache[url] = { tables = schema, time = os.time() }
+    end
+  end)
 end
 
 -- ── Alias extraction ───────────────────────────────────────────────────────────
@@ -239,10 +260,19 @@ function M.complete(before, url, aliases)
   local items = {}
 
   if ctx.type == "table" then
-    -- Complete table names
+    -- Complete table names. Two match strategies:
+    -- 1. Full-key prefix: "gr" matches "grip_test.butts", "us" matches "users".
+    -- 2. Bare-name suffix: "bu" matches "butts" inside "grip_test.butts" and
+    --    suggests the fully-qualified name. Only fires when word is non-empty
+    --    (empty word already matches all names via strategy 1 with prefix "").
     for name, _ in pairs(schema) do
       if name:sub(1, #ctx.word) == ctx.word then
         table.insert(items, item(name, "[table]"))
+      elseif ctx.word ~= "" then
+        local bare = name:match("%.([^.]+)$")
+        if bare and bare:sub(1, #ctx.word) == ctx.word then
+          table.insert(items, item(name, "[table]"))
+        end
       end
     end
 
@@ -287,17 +317,20 @@ function M.complete(before, url, aliases)
         end
       end
       -- If nothing in the cache, fall through to a live DuckDB attachment query.
+      -- Use duckdb_tables() which works for all attachment types (SQLite, PG, etc.).
+      -- Never use catalog.information_schema: SQLite attachments have none.
       if not found_in_cache then
         local ok, duckdb = pcall(require, "dadbod-grip.adapters.duckdb")
         if ok then
           local atts = duckdb.get_attachments(url)
           for _, att in ipairs(atts) do
             if att.alias == q then
-              -- Query attachment tables via DuckDB information_schema
               local db = require("dadbod-grip.db")
+              local safe_q = q:gsub("'", "''")
               local sql = string.format(
-                "SELECT table_name FROM %s.information_schema.tables WHERE table_schema = 'main'",
-                q
+                "SELECT table_name FROM duckdb_tables() WHERE database_name = '%s' AND internal = false"
+                  .. " UNION ALL SELECT view_name FROM duckdb_views() WHERE database_name = '%s' AND internal = false",
+                safe_q, safe_q
               )
               local result, _ = db.query(sql, url)
               if result and result.rows then
@@ -320,7 +353,7 @@ function M.complete(before, url, aliases)
     -- Use the schema cache first (populated by get_schema → get_column_info).
     local cached_key = ctx.alias .. "." .. ctx.table
     local cached_cols = schema[cached_key]
-    if cached_cols then
+    if cached_cols and #cached_cols > 0 then
       for _, col in ipairs(cached_cols) do
         local cname = col.column_name
         if cname and cname:sub(1, #ctx.word) == ctx.word then
@@ -329,10 +362,14 @@ function M.complete(before, url, aliases)
       end
     else
       -- Fallback: live query for DuckDB attachments not yet cached.
+      -- Use duckdb_columns() which works for all attachment types (SQLite, PG, etc.).
+      -- Never use catalog.information_schema: SQLite attachments have none.
       local db = require("dadbod-grip.db")
+      local safe_alias = ctx.alias:gsub("'", "''")
+      local safe_table = ctx.table:gsub("'", "''")
       local sql = string.format(
-        "SELECT column_name, data_type FROM %s.information_schema.columns WHERE table_name = '%s' AND table_schema = 'main'",
-        ctx.alias, ctx.table
+        "SELECT column_name, data_type FROM duckdb_columns() WHERE database_name = '%s' AND table_name = '%s' AND internal = false",
+        safe_alias, safe_table
       )
       local result, _ = db.query(sql, url)
       if result and result.rows then

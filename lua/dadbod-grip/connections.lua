@@ -403,6 +403,13 @@ function M.switch(url, name, conn_type, opts)
       vim.api.nvim_set_current_win(schema.get_winid())
     end
 
+    -- Pre-warm completion schema cache in background (avoids freeze on first keypress)
+    vim.schedule(function()
+      pcall(function()
+        require("dadbod-grip.completion").warm_schema(url)
+      end)
+    end)
+
     -- Pre-warm AI schema cache in background (avoids freeze on first AI call)
     vim.schedule(function()
       pcall(function()

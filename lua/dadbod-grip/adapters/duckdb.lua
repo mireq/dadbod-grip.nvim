@@ -135,6 +135,23 @@ local function duckdb(db_path, sql_str, timeout_ms, url)
   return result.stdout or "", stderr, result.code
 end
 
+--- Non-blocking async variant: spawns DuckDB and calls callback(stdout, stderr, code)
+--- from the main Neovim loop via vim.schedule. Used for schema pre-warming.
+local function duckdb_async(db_path, sql_str, timeout_ms, url, callback)
+  local effective_sql = url and (build_attach_prefix(url) .. sql_str) or sql_str
+  local args = { "duckdb", "-csv", "-header" }
+  if db_path ~= ":memory:" then
+    args[#args + 1] = db_path
+  end
+  args[#args + 1] = "-c"
+  args[#args + 1] = effective_sql
+  vim.system(args, { text = true, timeout = timeout_ms or 8000 }, function(out)
+    vim.schedule(function()
+      callback(out.stdout or "", out.stderr or "", out.code)
+    end)
+  end)
+end
+
 --- Run DML without CSV mode (to get change count output).
 local function duckdb_exec(db_path, sql_str, timeout_ms, url)
   local effective_sql = sql_str
@@ -206,18 +223,17 @@ function M.get_primary_keys(table_name, url)
         AND constraint_type = 'PRIMARY KEY'
     ]], catalog:gsub("'", "''"), schema:gsub("'", "''"), tbl:gsub("'", "''"))
   else
-    -- Main DB: use information_schema (works for main schema + native schemas).
+    -- Main DB: use duckdb_constraints() with a string-literal database_name filter
+    -- (same reason as get_column_info — information_schema fails with attachments).
+    local main_catalog = db_path:match("([^/]+)%.[^.]+$") or db_path:match("([^/]+)$") or "memory"
     sql_str = string.format([[
-      SELECT kcu.column_name
-      FROM information_schema.table_constraints tc
-      JOIN information_schema.key_column_usage kcu
-        ON tc.constraint_name = kcu.constraint_name
-        AND tc.table_schema = kcu.table_schema
-      WHERE tc.constraint_type = 'PRIMARY KEY'
-        AND tc.table_schema = '%s'
-        AND tc.table_name = '%s'
-      ORDER BY kcu.ordinal_position
-    ]], schema:gsub("'", "''"), tbl:gsub("'", "''"))
+      SELECT UNNEST(constraint_column_names) AS column_name
+      FROM duckdb_constraints()
+      WHERE database_name = '%s'
+        AND schema_name = '%s'
+        AND table_name = '%s'
+        AND constraint_type = 'PRIMARY KEY'
+    ]], main_catalog:gsub("'", "''"), schema:gsub("'", "''"), tbl:gsub("'", "''"))
   end
 
   local stdout, stderr, code = duckdb(db_path, sql_str, nil, url)
@@ -261,30 +277,26 @@ function M.get_column_info(table_name, url)
       ORDER BY column_index
     ]], catalog:gsub("'", "''"), schema:gsub("'", "''"), tbl:gsub("'", "''"))
   else
-    -- Main DB (native schema or main schema): use information_schema.columns.
+    -- Main DB: use duckdb_columns() with a string-literal database_name filter.
+    -- information_schema.columns fails when attachments are present (DuckDB enumerates
+    -- all catalogs including the SQLite one, which doesn't support duckdb_columns()).
+    -- duckdb_columns() with WHERE database_name = '...' is immune to this.
+    -- Catalog names from tempname-style paths may start with digits (invalid SQL identifiers),
+    -- so string literals are required here rather than catalog-qualified syntax.
+    local main_catalog = db_path:match("([^/]+)%.[^.]+$") or db_path:match("([^/]+)$") or "memory"
     info_sql = string.format([[
       SELECT
-        c.column_name,
-        c.data_type,
-        c.is_nullable,
-        COALESCE(c.column_default, '') AS column_default,
-        COALESCE(
-          (SELECT string_agg(tc.constraint_type, ', ')
-           FROM information_schema.key_column_usage kcu
-           JOIN information_schema.table_constraints tc
-             ON tc.constraint_name = kcu.constraint_name
-             AND tc.table_schema = kcu.table_schema
-           WHERE kcu.table_schema = '%s'
-             AND kcu.table_name = '%s'
-             AND kcu.column_name = c.column_name),
-          ''
-        ) AS constraints
-      FROM information_schema.columns c
-      WHERE c.table_schema = '%s'
-        AND c.table_name = '%s'
-      ORDER BY c.ordinal_position
-    ]], schema:gsub("'", "''"), tbl:gsub("'", "''"),
-        schema:gsub("'", "''"), tbl:gsub("'", "''"))
+        column_name,
+        data_type,
+        CASE WHEN is_nullable THEN 'YES' ELSE 'NO' END AS is_nullable,
+        COALESCE(column_default, '') AS column_default,
+        '' AS constraints
+      FROM duckdb_columns()
+      WHERE database_name = '%s'
+        AND schema_name = '%s'
+        AND table_name = '%s'
+      ORDER BY column_index
+    ]], main_catalog:gsub("'", "''"), schema:gsub("'", "''"), tbl:gsub("'", "''"))
   end
 
   local stdout, stderr, code = duckdb(db_path, info_sql, nil, url)
@@ -691,10 +703,10 @@ function M.attach(url, dsn, alias)
   test_sql = test_sql .. string.format("ATTACH IF NOT EXISTS '%s' AS %s;\n", dsn:gsub("'", "''"), alias)
   test_sql = test_sql .. "SELECT 42;"
 
-  local args = { "duckdb" }
-  if db_path ~= ":memory:" then args[#args + 1] = db_path end
-  args[#args + 1] = "-c"
-  args[#args + 1] = test_sql
+  -- Validate in-memory: avoids acquiring a write lock on the main db file.
+  -- If we opened db_path here, we'd race with list_tables / get_schema_batch_async
+  -- (both also open the same file), causing "Failed to lock file" on connection switch.
+  local args = { "duckdb", "-c", test_sql }
 
   local result = vim.system(args, { text = true, timeout = 10000 }):wait()
   if result.code ~= 0 then
@@ -703,6 +715,8 @@ function M.attach(url, dsn, alias)
   end
 
   store_attachment(url, dsn, alias)
+  -- warm_schema is NOT scheduled here: the caller (connections.switch or GripAttach)
+  -- is responsible, so only one async duckdb process opens the file after connect.
   return nil
 end
 
@@ -739,6 +753,123 @@ function M.load_attachments(url, attachments)
       vim.notify(string.format("Skipped attachment '%s': %s", a.alias, err), vim.log.levels.WARN)
     end
   end
+end
+
+--- Build the schema batch SQL for get_schema_batch / get_schema_batch_async.
+--- With attachments: UNION ALL of main-catalog columns (full) + attached-catalog
+--- table names only (fast: no remote column scan). One CLI spawn covers both.
+--- Without attachments: plain information_schema.columns query.
+local function _make_schema_batch_sql(has_attachments, main_catalog)
+  if has_attachments then
+    -- 6-column result: rtype, database_name, schema_name, table_name, column_name, data_type
+    -- 'col' rows = all DB columns (main + attached catalogs via duckdb_columns())
+    -- 'tbl' rows = views only (duckdb_columns() does not cover views)
+    return [[
+      SELECT 'col' AS rtype, database_name, schema_name, table_name, column_name, data_type
+      FROM duckdb_columns()
+      WHERE internal = false
+      UNION ALL
+      SELECT 'tbl' AS rtype, database_name, schema_name, view_name, '', ''
+      FROM duckdb_views()
+      WHERE internal = false
+      ORDER BY 1, 2, 3
+    ]]
+  else
+    -- No attachments: information_schema.columns covers main DB + native schemas.
+    return [[
+      SELECT table_schema, table_name, column_name, data_type
+      FROM information_schema.columns
+      WHERE table_schema NOT IN ('information_schema', 'pg_catalog')
+      ORDER BY table_schema, table_name, ordinal_position
+    ]]
+  end
+end
+
+--- Parse CSV rows from _make_schema_batch_sql into the schema cache format.
+--- Returns { [full_table_name] = [{column_name, data_type, is_nullable}] } or nil.
+local function _parse_schema_batch_rows(parsed, has_attachments, main_catalog)
+  if not parsed then return nil end
+  local tables = {}
+  if has_attachments then
+    -- 6-column rows: rtype, database_name, schema_name, table_name, col_name, data_type
+    for _, row in ipairs(parsed.rows) do
+      local rtype       = row[1] or ""
+      local catalog     = row[2] or main_catalog
+      local schema_name = row[3] or "main"
+      local tname       = row[4] or ""
+      if rtype == "col" then
+        -- Column row from duckdb_columns() — covers both main catalog and attached catalogs.
+        local col_name  = row[5] or ""
+        local data_type = row[6] or ""
+        local full_name
+        if catalog == main_catalog then
+          full_name = (schema_name == "main") and tname or (schema_name .. "." .. tname)
+        else
+          -- Attached catalog: prefix with catalog alias (matches list_tables() output)
+          full_name = catalog .. "." .. tname
+        end
+        tables[full_name] = tables[full_name] or {}
+        table.insert(tables[full_name], { column_name = col_name, data_type = data_type, is_nullable = "" })
+      else
+        -- View row: duckdb_columns() does not include views, so register them name-only.
+        local full_name
+        if catalog == main_catalog then
+          full_name = (schema_name == "main") and tname or (schema_name .. "." .. tname)
+        else
+          full_name = catalog .. "." .. tname
+        end
+        tables[full_name] = tables[full_name] or {}
+      end
+    end
+  else
+    -- 4-column rows: table_schema, table_name, column_name, data_type
+    for _, row in ipairs(parsed.rows) do
+      local schema_name = row[1] or "main"
+      local tname       = row[2] or ""
+      local col_name    = row[3] or ""
+      local data_type   = row[4] or ""
+      local full_name = (schema_name == "main") and tname or (schema_name .. "." .. tname)
+      tables[full_name] = tables[full_name] or {}
+      table.insert(tables[full_name], { column_name = col_name, data_type = data_type, is_nullable = "" })
+    end
+  end
+  return tables
+end
+
+--- Fetch all table columns in a single DuckDB query (O(1) CLI spawns).
+--- Returns { [full_table_name] = [{column_name, data_type, is_nullable}] } or nil on error.
+--- full_table_name matches list_tables() output:
+---   main-schema tables      -> "employees"
+---   native DuckDB schemas   -> "analytics.events"
+---   attached catalogs       -> "supplier.orders"
+function M.get_schema_batch(url)
+  local db_path = extract_path(url)
+  if not db_path then return nil end
+
+  local has_attachments = _attachments[url] and #_attachments[url] > 0
+  local main_catalog = db_path:match("([^/]+)%.[^.]+$") or db_path:match("([^/]+)$") or "memory"
+  local sql_str = _make_schema_batch_sql(has_attachments, main_catalog)
+
+  local stdout, _, code = duckdb(db_path, sql_str, nil, url)
+  if code ~= 0 then return nil end
+
+  return _parse_schema_batch_rows(db_util.parse_csv(stdout), has_attachments, main_catalog)
+end
+
+--- Async variant: fetches schema batch without blocking. Calls callback(tables) when done.
+--- Used for pre-warming the completion cache on connection switch / GripAttach.
+function M.get_schema_batch_async(url, callback)
+  local db_path = extract_path(url)
+  if not db_path then callback(nil); return end
+
+  local has_attachments = _attachments[url] and #_attachments[url] > 0
+  local main_catalog = db_path:match("([^/]+)%.[^.]+$") or db_path:match("([^/]+)$") or "memory"
+  local sql_str = _make_schema_batch_sql(has_attachments, main_catalog)
+
+  duckdb_async(db_path, sql_str, 8000, url, function(stdout, _, code)
+    if code ~= 0 then callback(nil); return end
+    callback(_parse_schema_batch_rows(db_util.parse_csv(stdout), has_attachments, main_catalog))
+  end)
 end
 
 -- Exposed for testing

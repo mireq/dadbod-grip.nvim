@@ -109,8 +109,13 @@ eq(completion.parse_context("--"), nil,       "comment: nil")
 -- Mock db.list_tables and db.get_column_info to avoid real DB calls.
 
 local function mock_db(tables_by_name)
-  local orig_list = db.list_tables
-  local orig_cols = db.get_column_info
+  local orig_list  = db.list_tables
+  local orig_cols  = db.get_column_info
+  local orig_batch = db.get_schema_batch
+
+  -- Return nil from batch so tests exercise the per-table fallback path
+  -- (avoids real DuckDB CLI invocations in unit tests).
+  db.get_schema_batch = function(url) return nil end
 
   db.list_tables = function(url)
     local result = {}
@@ -125,8 +130,9 @@ local function mock_db(tables_by_name)
   end
 
   return function()
-    db.list_tables = orig_list
-    db.get_column_info = orig_cols
+    db.list_tables      = orig_list
+    db.get_column_info  = orig_cols
+    db.get_schema_batch = orig_batch
   end
 end
 
@@ -426,6 +432,269 @@ do
   local before2 = "FROM "
   local not_dotted = before2:match("[%w_]+%.[%w_]*$") ~= nil
   ok(not not_dotted, "auto-trigger guard: plain FROM does not match dotted pattern")
+end
+
+-- ── DuckDB federation: live-query fallback for SQLite attachments ─────────────
+-- When the schema cache is empty (e.g. first keystroke after GripAttach before
+-- get_schema has populated it), the dotted handler falls to a live query.
+-- The OLD fallback used b.information_schema.tables which fails for SQLite.
+-- The NEW fallback must use duckdb_tables() WHERE database_name = 'b' instead.
+do
+  local ATT_URL = "duckdb:attach_fallback_test.duckdb"
+  local duckdb_adapter = require("dadbod-grip.adapters.duckdb")
+
+  -- Register "b" as a SQLite attachment (no real DuckDB needed for this test)
+  duckdb_adapter._attach_unchecked(ATT_URL, "sqlite:/tmp/test_butts.db", "b")
+
+  -- Force cache miss: list_tables returns empty so "b.butts" is NOT in schema cache
+  local orig_list  = db.list_tables
+  local orig_cols  = db.get_column_info
+  local orig_query = db.query
+
+  db.list_tables     = function(url) return {}, nil end
+  db.get_column_info = function(tn, url) return {}, nil end
+
+  -- Mock db.query to simulate responses:
+  -- information_schema → fails (SQLite has no information_schema)
+  -- duckdb_tables()    → returns the "butts" table (correct fallback)
+  db.query = function(sql, url)
+    if sql:find("information_schema") then
+      return nil, "Catalog Error: b.information_schema does not exist"
+    end
+    if sql:find("duckdb_tables") and sql:find("database_name") then
+      return { rows = { {"butts"} }, columns = {"table_name"} }, nil
+    end
+    return nil, "unexpected query in test: " .. tostring(sql)
+  end
+
+  completion.invalidate(ATT_URL)
+  local items = completion.complete("SELECT b.", ATT_URL, {})
+  local names = {}
+  for _, it in ipairs(items) do names[it.word] = true end
+
+  -- This assertion drives the fix: "butts" must appear even when
+  -- the schema cache is cold and the live fallback must run.
+  ok(names["butts"],
+     "attached SQLite alias 'b': 'butts' appears in 'SELECT b.' via live fallback")
+
+  -- Cleanup
+  duckdb_adapter.detach(ATT_URL, "b")
+  db.list_tables     = orig_list
+  db.get_column_info = orig_cols
+  db.query           = orig_query
+end
+
+
+-- ── DuckDB federation: fed_column fallback for SQLite attachments ─────────────
+-- Three-part "b.butts.col" when schema cache is cold should use duckdb_columns(),
+-- not b.information_schema.columns (SQLite has no information_schema).
+do
+  local ATT2_URL = "duckdb:fed_col_fallback_test.duckdb"
+  local duckdb_adapter = require("dadbod-grip.adapters.duckdb")
+  duckdb_adapter._attach_unchecked(ATT2_URL, "sqlite:/tmp/test_butts2.db", "b")
+
+  local orig_list  = db.list_tables
+  local orig_cols  = db.get_column_info
+  local orig_query = db.query
+
+  db.list_tables     = function(url) return {}, nil end
+  db.get_column_info = function(tn, url) return {}, nil end
+
+  db.query = function(sql, url)
+    if sql:find("information_schema") then
+      return nil, "Catalog Error: b.information_schema does not exist"
+    end
+    if sql:find("duckdb_columns") and sql:find("database_name") then
+      return { rows = { {"id", "INTEGER"}, {"weight", "DOUBLE"} }, columns = {"column_name","data_type"} }, nil
+    end
+    return nil, "unexpected query: " .. tostring(sql)
+  end
+
+  completion.invalidate(ATT2_URL)
+  local items = completion.complete("SELECT b.butts.", ATT2_URL, {})
+  local names = {}
+  for _, it in ipairs(items) do names[it.word] = true end
+
+  ok(names["id"],     "fed_column SQLite fallback: 'id' column via duckdb_columns()")
+  ok(names["weight"], "fed_column SQLite fallback: 'weight' column via duckdb_columns()")
+
+  duckdb_adapter.detach(ATT2_URL, "b")
+  db.list_tables     = orig_list
+  db.get_column_info = orig_cols
+  db.query           = orig_query
+end
+
+-- ── table context: bare-name match for federated schema keys ─────────────────
+-- Typing "FROM bu" with schema {"grip_test.butts": {}} must suggest "grip_test.butts".
+-- The table part "butts" starts with "bu" even though the full key "grip_test.butts" does not.
+do
+  local FED_TABLE_URL = "duckdb:fed_table_match_test.duckdb"
+
+  local orig_batch = db.get_schema_batch
+  -- Schema has a federated table and a plain main-DB table
+  db.get_schema_batch = function(url)
+    return {
+      ["grip_test.butts"] = {},
+      ["users"] = {
+        { column_name = "id", data_type = "integer", is_nullable = "NO" },
+      },
+    }
+  end
+
+  completion.invalidate(FED_TABLE_URL)
+
+  -- "FROM bu" → bare-name match: "butts" in "grip_test.butts" starts with "bu"
+  local items = completion.complete("SELECT * FROM bu", FED_TABLE_URL, {})
+  local names = {}
+  for _, it in ipairs(items) do names[it.word] = true end
+  ok(names["grip_test.butts"], "table bare-name match: 'FROM bu' finds 'grip_test.butts'")
+  ok(not names["users"],       "table bare-name match: 'FROM bu' does not find 'users'")
+
+  -- "FROM us" → direct prefix match: "users" starts with "us"
+  items = completion.complete("SELECT * FROM us", FED_TABLE_URL, {})
+  names = {}
+  for _, it in ipairs(items) do names[it.word] = true end
+  ok(names["users"],               "table direct match: 'FROM us' finds 'users'")
+  ok(not names["grip_test.butts"], "table direct match: 'FROM us' does not find 'grip_test.butts'")
+
+  -- "FROM " (empty word) → all tables, no double-add from bare match
+  items = completion.complete("SELECT * FROM ", FED_TABLE_URL, {})
+  local counts = {}
+  for _, it in ipairs(items) do counts[it.word] = (counts[it.word] or 0) + 1 end
+  ok(counts["grip_test.butts"] == 1, "table empty word: 'grip_test.butts' appears exactly once")
+  ok(counts["users"] == 1,           "table empty word: 'users' appears exactly once")
+
+  db.get_schema_batch = orig_batch
+end
+
+-- ── fed_column: empty cached_cols must fire live fallback ─────────────────────
+-- When get_schema_batch returns table-names-only {"b.butts" -> {}}, typing
+-- "b.butts." must still return columns via the live duckdb_columns() fallback.
+-- Lua's empty-table truthiness makes {} truthy, so "if cached_cols then" is
+-- the bug: it enters the cache branch, iterates zero rows, and returns nothing.
+-- Fix: "if cached_cols and #cached_cols > 0 then" correctly falls through.
+do
+  local BATCH_URL = "duckdb:batch_empty_cols_test.duckdb"
+
+  local orig_batch = db.get_schema_batch
+  local orig_query = db.query
+
+  -- Simulate table-names-only batch: key exists but column array is empty
+  db.get_schema_batch = function(url) return { ["b.butts"] = {} } end
+
+  -- Live fallback must be called and return columns
+  db.query = function(sql, url)
+    if sql:find("duckdb_columns") then
+      return { rows = { {"id", "INTEGER"}, {"weight", "DOUBLE"} }, columns = {"column_name","data_type"} }, nil
+    end
+    return nil, "unexpected query: " .. tostring(sql)
+  end
+
+  completion.invalidate(BATCH_URL)
+  local items = completion.complete("SELECT b.butts.", BATCH_URL, {})
+  local names = {}
+  for _, it in ipairs(items) do names[it.word] = true end
+
+  ok(names["id"],     "fed_column empty-cache live fallback: 'id' column appears")
+  ok(names["weight"], "fed_column empty-cache live fallback: 'weight' column appears")
+
+  db.get_schema_batch = orig_batch
+  db.query            = orig_query
+end
+
+-- ── dotted: table-names-only batch still surfaces table names for alias. ───────
+-- When get_schema_batch returns {"b.butts": {}, "b.orders": {}}, typing "b."
+-- must still show "butts" and "orders" via the cache prefix scan. The scan
+-- iterates schema keys (not values), so empty column arrays don't matter here.
+do
+  local BATCH2_URL = "duckdb:batch_dotted_test.duckdb"
+
+  local orig_batch = db.get_schema_batch
+  db.get_schema_batch = function(url) return { ["b.butts"] = {}, ["b.orders"] = {} } end
+
+  completion.invalidate(BATCH2_URL)
+  local items = completion.complete("SELECT b.", BATCH2_URL, {})
+  local names = {}
+  for _, it in ipairs(items) do names[it.word] = true end
+
+  ok(names["butts"],  "dotted names-only batch: 'butts' appears for 'b.'")
+  ok(names["orders"], "dotted names-only batch: 'orders' appears for 'b.'")
+
+  db.get_schema_batch = orig_batch
+end
+
+-- ── column context: main DB columns must survive when attachments exist ───────
+-- Regression guard: when get_schema_batch returns a CORRECT mixed result
+-- (main DB table has columns, attached table is names-only), SELECT b must
+-- surface main DB column completions. If batch incorrectly returns all-empty,
+-- no columns are found and only keywords like BETWEEN appear.
+do
+  local MIXED_URL = "duckdb:mixed_batch_col_test.duckdb"
+  local orig_batch = db.get_schema_batch
+
+  -- Simulate the CORRECT mixed-batch output that the fixed get_schema_batch must return:
+  -- main DB table "employees" has full column info;
+  -- attached catalog table "grip_test.butts" is names-only (empty array).
+  db.get_schema_batch = function(url)
+    return {
+      ["employees"] = {
+        { column_name = "budget",      data_type = "DECIMAL" },
+        { column_name = "name",        data_type = "TEXT" },
+        { column_name = "bonus_pct",   data_type = "REAL" },
+      },
+      ["grip_test.butts"] = {},
+    }
+  end
+
+  completion.invalidate(MIXED_URL)
+
+  -- SELECT b → column context: must find "budget" and "bonus_pct" from employees
+  local items = completion.complete("SELECT b", MIXED_URL, {})
+  local names = {}
+  for _, it in ipairs(items) do names[it.word] = true end
+
+  ok(names["budget"],    "mixed batch col ctx: 'budget' column appears for SELECT b")
+  ok(names["bonus_pct"], "mixed batch col ctx: 'bonus_pct' column appears for SELECT b")
+  -- If the regression were present (all-empty batch), names would be empty here
+  -- and only keyword "BETWEEN" would appear via the keyword fallback.
+
+  -- SELECT n → must find "name"
+  items = completion.complete("SELECT n", MIXED_URL, {})
+  names = {}
+  for _, it in ipairs(items) do names[it.word] = true end
+  ok(names["name"], "mixed batch col ctx: 'name' column appears for SELECT n")
+
+  db.get_schema_batch = orig_batch
+end
+
+-- ── warm_schema: populates cache so columns are available before first keypress ──
+do
+  local WARM_URL = "duckdb:warm_schema_test.duckdb"
+  local orig_batch_async = db.get_schema_batch_async
+
+  local async_called = false
+  db.get_schema_batch_async = function(url, callback)
+    async_called = true
+    -- Simulate async result arriving synchronously for test purposes
+    callback({
+      ["warm_table"] = {
+        { column_name = "warm_col", data_type = "TEXT" },
+      },
+    })
+  end
+
+  completion.invalidate(WARM_URL)
+  completion.warm_schema(WARM_URL)
+
+  ok(async_called, "warm_schema: calls get_schema_batch_async")
+
+  -- After warm_schema, SELECT w must find warm_col (cache is populated)
+  local items = completion.complete("SELECT w", WARM_URL, {})
+  local names = {}
+  for _, it in ipairs(items) do names[it.word] = true end
+  ok(names["warm_col"], "warm_schema: column available after pre-warm")
+
+  db.get_schema_batch_async = orig_batch_async
 end
 
 -- ── summary ───────────────────────────────────────────────────────────────────

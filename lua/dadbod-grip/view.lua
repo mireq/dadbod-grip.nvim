@@ -4735,6 +4735,17 @@ function M.show_help(opts)
         end
       end, { buffer = popup_buf })
     end
+
+    vim.keymap.set("n", "gx", function()
+      local url = "https://jorypestorious.com/dadbod-grip-web"
+      if vim.ui.open then
+        vim.ui.open(url)
+      elseif vim.fn.has("mac") == 1 then
+        vim.fn.jobstart({ "open", url }, { detach = true })
+      else
+        vim.fn.jobstart({ "xdg-open", url }, { detach = true })
+      end
+    end, { buffer = popup_buf, desc = "Open docs" })
 end
 
 -- Register callbacks for edit/delete/insert/apply/refresh from init.

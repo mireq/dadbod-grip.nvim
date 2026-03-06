@@ -145,6 +145,30 @@ local constrs, cstr_err = adapter.get_constraints("supplier.orders", duck_url)
 truthy(constrs ~= nil, "get_constraints: no nil return for supplier.orders")
 eq(cstr_err, nil, "get_constraints: no error for supplier.orders")
 
+-- ── get_schema_batch with attachments: main-DB columns preserved ────────────
+-- When has_attachments=true, main DB tables must have full column info.
+-- Attached-catalog tables must be names-only (empty column array).
+-- The previous regression stored {} for ALL tables, causing SELECT col → only keywords.
+
+local batch = adapter.get_schema_batch(duck_url)
+truthy(batch, "get_schema_batch with attachments: returns non-nil")
+
+local users_batch_cols = batch and batch["users"]
+truthy(users_batch_cols, "get_schema_batch: 'users' table present in batch")
+truthy(users_batch_cols and #users_batch_cols > 0,
+  "get_schema_batch: 'users' has column info when attachments exist (not empty array)")
+
+local found_id_col = false
+for _, c in ipairs(users_batch_cols or {}) do
+  if c.column_name == "id" then found_id_col = true; break end
+end
+eq(found_id_col, true, "get_schema_batch: 'users.id' column present in batch result")
+
+local orders_batch_cols = batch and batch["supplier.orders"]
+truthy(orders_batch_cols ~= nil, "get_schema_batch: 'supplier.orders' present in batch")
+truthy(orders_batch_cols and #orders_batch_cols > 0,
+  "get_schema_batch: 'supplier.orders' has column info (federated columns from attached catalog)")
+
 -- ── list_tables with native schema (no attachments) ────────────────────────
 -- Create a native DuckDB schema on a fresh DB, verify schema-prefixed names appear.
 local native_duck_path = tmp .. "_native.duckdb"
@@ -178,6 +202,20 @@ for _, t in ipairs(tables or {}) do
   if t.schema then has_schema_field = true; break end
 end
 eq(has_schema_field, false, "no .schema field after detach")
+
+-- ── M.attach() validation must use in-memory mode (no write lock on main db) ──
+-- When validation opens the actual db_path, it acquires a DuckDB write lock.
+-- If warm_schema's async process also holds the lock, list_tables fails with
+-- "unable to open database: Failed to lock file" (the real production bug).
+-- Proof: attach with a URL whose path cannot be created (nonexistent dir).
+-- Memory-mode validation succeeds regardless; db_path-mode validation fails.
+
+local fake_url = "duckdb:/tmp/grip_nonexistent_dir_" .. tostring(math.random(1e9)) .. "/test.duckdb"
+local mem_sqlite = tmp .. "_mem_test.db"
+vim.fn.system("sqlite3 " .. vim.fn.shellescape(mem_sqlite) .. [[ "CREATE TABLE mt (id INTEGER);"]])
+local mem_err = adapter.attach(fake_url, "sqlite:" .. mem_sqlite, "mem_test")
+eq(mem_err, nil, "attach validation: must use memory mode (not open main db path)")
+vim.fn.delete(mem_sqlite)
 
 -- Cleanup
 vim.fn.delete(duck_path)
