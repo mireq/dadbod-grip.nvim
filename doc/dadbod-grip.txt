@@ -408,7 +408,7 @@ SCHEMA AND WORKFLOW ~
   g!              Toggle write mode (apply overwrites local file; remote = off)
   gN              Rename column under cursor
   gw              Jump to grid window
-  q               Open query pad (pre-filled with current query)
+  q               Focus query pad (pre-fills if empty; appends if pad has content)
   gh              Query history browser
   A               AI SQL generation (natural language)
 
@@ -509,7 +509,7 @@ Schema browser keymaps:
   y               Yank table or column name to clipboard
   go              Open table under cursor, ORDER BY latest (created_at / PK DESC)
   gT / gt         Table picker (fuzzy finder)
-  q               Open query pad
+  q               Focus query pad (pre-fills if empty; appends if pad has content)
   gq              Load saved query (picker with SQL preview)
   gw              Jump to grid window
   gC / gc         Switch database connection
@@ -526,8 +526,23 @@ markers for primary keys and foreign keys.
 ==============================================================================
 11. QUERY PAD                                             *grip-query-pad*
 
-Open with `:GripQuery` or `q` from a grid buffer. Creates a scratch SQL
-buffer with filetype=sql and built-in nvim-cmp completion.
+Open with `:GripQuery` or `q` from any grip buffer. Creates a persistent
+scratch SQL buffer with filetype=sql and built-in completion.
+
+Content protection: pressing `q` or `2` focuses the pad without replacing
+anything. Clicking a table in the sidebar or picker appends the new query
+below existing SQL with a blank separator. The pad is only pre-filled when
+it is empty (or contains only the hint comment). Your work is never lost.
+
+`<C-CR>` in visual mode runs only the selected lines. In normal or insert
+mode it runs the full buffer. `gA` reads existing pad content and modifies
+it rather than generating from scratch.
+
+SQL completion is built in: table names, column names, aliases, and SQL
+keywords complete automatically as you type. In DuckDB federated sessions,
+columns from all attached databases appear with schema-qualified names
+(e.g. `pg.users.email`). The nvim-cmp source name is `dadbod_grip`.
+Works with nvim-cmp, blink.cmp, or standalone via `<C-Space>`.
 
 Query pad keymaps:
   <C-CR>          Execute buffer contents into a grip grid (normal/insert)
@@ -541,10 +556,6 @@ Query pad keymaps:
   gw              Jump to grid window
   gb              Schema browser (focus if open; close from inside)
   gC / <C-g>      Switch database connection
-
-SQL completion is built in: table names, column names, aliases, and SQL
-keywords complete automatically as you type. The nvim-cmp source name is
-`dadbod_grip`. vim-dadbod-completion is not required.
 
 ==============================================================================
 12. SAVED QUERIES                                      *grip-saved-queries*

@@ -150,8 +150,8 @@ work without credentials.
 - **ER diagram** via `gG` or `4`: a tree-spine float showing every table with PK/FK/column summary, arranged by FK depth with box-drawing connectors. Press `<CR>` on any table to open its grid. Press `f` to follow a foreign key and `H` to go back (breadcrumb trail updates). `Tab`/`S-Tab` cycle between tables. Press `gG` or `q` to close. Column names truncate gracefully; overflow columns show a right-aligned `+N` count. Works from the grid, the query pad, and the schema sidebar.
 - **Schema browser** via `:GripSchema` or `gb` showing a sidebar tree with columns, types, and PK/FK markers. `gb` opens/focuses the browser from any buffer; pressing `gb` from inside closes it.
 - **Table picker** via `:GripTables` or `gT` / `gt` providing a fuzzy finder with column preview. Available from all three buffers: grid, query pad, and sidebar. In the sidebar, `go` opens the table under cursor with `ORDER BY created_at / PK DESC` so the latest rows appear first.
-- **SQL query pad** via `:GripQuery` or `q` opening a scratch buffer that pipes results into editable grids.
-- **Built-in SQL completion** (nvim-cmp source `dadbod_grip`) with table names, column names, SQL alias tracking, and keywords. Triggers automatically while typing or via `<C-Space>`. No additional plugins required.
+- **SQL query pad** via `:GripQuery` or `q`. A persistent scratch buffer that pipes results into editable grids. Clicking a table in the sidebar or picker never replaces pad content: new queries append below existing SQL with a blank separator so all your work stays intact. `<C-CR>` runs the visual selection or the full buffer. `gA` reads existing pad content and modifies it rather than generating from scratch. Pressing `q` or `2` focuses the pad without overwriting anything.
+- **Built-in SQL completion** with table names, column names, SQL keywords, and alias tracking. No extra plugins required. In DuckDB federated sessions, columns from all attached databases appear with schema-qualified names (e.g. `pg.users.email`). Works with nvim-cmp (source `dadbod_grip`), blink.cmp, or standalone via `<C-Space>` and auto-trigger.
 - **Saved queries** via `:GripSave` and `:GripLoad` persisting to project-local `.grip/queries/` files.
 - **Connection profiles** via `:GripConnect` or `gC` storing connections in `.grip/connections.json` with `g:dbs` backward compatibility. Connections auto-persist globally (`~/.grip/connections.json`) so they're available from any project. Connecting opens the full workspace (schema sidebar + query pad) automatically.
 - **Data diff** via `:GripDiff` or `gD` comparing two tables by primary key with color-coded change highlighting. Auto-switches to compact layout on narrow terminals (<120 cols), toggle with `gv`.
@@ -342,7 +342,7 @@ Note: explain query plan is at `gx` (Query Doctor).
 | `gW` | Toggle watch mode (auto-refresh on timer, default 5s) |
 | `g!` | Toggle write mode (apply edits overwrites local file) |
 | `gN` | Rename column under cursor |
-| `q` | Open query pad (pre-filled with current query) |
+| `q` | Focus query pad (pre-fills if empty; appends if pad has content) |
 | `gw` | Jump to grid (from query pad or sidebar) |
 | `gh` | Query history browser |
 | `A` | AI SQL generation (natural language) |
