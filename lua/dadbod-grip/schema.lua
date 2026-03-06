@@ -7,6 +7,8 @@ local VERSION = require("dadbod-grip.version")
 
 local M = {}
 
+local _ag = vim.api.nvim_create_augroup("DadbodGripSchema", { clear = true })
+
 -- Active schema state (one per connection URL)
 local _states = {}
 local _sidebar_bufnr = nil
@@ -883,15 +885,15 @@ local function setup_keymaps(url)
       "  F         Clear filter",
       "",
       "  Tab Views",
-      "  1         Table picker",
-      "  2         Records (default)",
-      "  3         Columns",
-      "  4         Foreign Keys",
-      "  5         Indexes",
-      "  6         Constraints",
-      "  7         Column Stats",
-      "  8         History",
-      "  9         Explain",
+      "  1         Connections picker",
+      "  2         Query pad",
+      "  3         Jump to grid / table picker",
+      "  4         ER diagram float",
+      "  5         Stats view",
+      "  6         Columns view",
+      "  7         Foreign keys view",
+      "  8         Indexes view",
+      "  9         Constraints view",
       "",
       "  Actions",
       "  r         Refresh schema",
@@ -959,6 +961,7 @@ local function setup_keymaps(url)
     end
 
     vim.api.nvim_create_autocmd("WinLeave", {
+      group  = _ag,
       buffer = popup_buf,
       once = true,
       callback = function() vim.schedule(close) end,

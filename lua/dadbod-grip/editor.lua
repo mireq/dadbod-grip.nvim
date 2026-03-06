@@ -3,6 +3,8 @@
 
 local M = {}
 
+local _ag = vim.api.nvim_create_augroup("DadbodGripEditor", { clear = true })
+
 -- Sentinel: caller uses this to distinguish "user set NULL" from "user cancelled".
 M.NULL_VALUE = "__GRIP_NULL__"
 
@@ -97,6 +99,7 @@ function M.open(prompt, initial_value, on_save)
 
   -- Also cancel if the float loses focus
   vim.api.nvim_create_autocmd("WinLeave", {
+    group  = _ag,
     buffer = edit_buf,
     once = true,
     callback = function()
@@ -167,6 +170,7 @@ function M.show_error(title, lines)
 
   -- Safety: dismiss if float loses focus (e.g. user clicks away)
   vim.api.nvim_create_autocmd("WinLeave", {
+    group  = _ag,
     buffer = err_buf,
     once = true,
     callback = dismiss,

@@ -11,6 +11,9 @@ local query  = require("dadbod-grip.query")
 local M = {}
 M._version = require("dadbod-grip.version")
 
+-- Module-level augroup: prevents handler accumulation on config re-source.
+local _ag = vim.api.nvim_create_augroup("DadbodGripInit", { clear = true })
+
 -- Default options (overridden by setup)
 local OPTS = {
   limit       = 100,
@@ -466,6 +469,7 @@ local function do_edit(bufnr, cell, url)
       -- auto-removes the autocmd so it cannot fire again on the next user action.
       local p_line, p_col = pos.line, pos.col
       vim.api.nvim_create_autocmd("SafeState", {
+        group = _ag,
         once = true,
         callback = function()
           local w2 = vim.fn.bufwinid(bufnr)
@@ -715,6 +719,10 @@ function M._mutation_preview(mutation_sql, url, stmt_type, caller_opts)
 end
 
 -- ── open ──────────────────────────────────────────────────────────────────
+---Open a table or raw SQL query in a grip grid.
+---@param arg string  Table name or SQL query
+---@param url? string Connection URL (uses active connection if nil)
+---@param opts? table Additional options (write, watch_ms)
 function M.open(arg, url, opts)
   -- Resolve connection URL
   local conn = url
@@ -1006,6 +1014,7 @@ end
 -- DBUI-aware smart open: detects context from current buffer and opens
 -- the appropriate table in the grid. Works from SQL query buffers,
 -- dbout result buffers, and normal buffers (word under cursor).
+---Open the table under cursor, adapting to the current buffer context.
 function M.open_smart()
   local bufnr = vim.api.nvim_get_current_buf()
 
@@ -1095,8 +1104,8 @@ function M.open_smart()
 end
 
 -- ── welcome screen ────────────────────────────────────────────────────────
---- Open the Chonk welcome screen when :Grip is invoked with no arguments.
---- Creates a grip://welcome buffer, shows logo + Chonk mascot + feature hints.
+---Open the welcome screen (Chonk mascot + feature hints).
+---Called automatically when :Grip is invoked with no arguments.
 function M.open_welcome()
   -- Find existing welcome buffer
   local welcome_buf = nil
@@ -1154,6 +1163,10 @@ function M.open_welcome()
     "  gc      connect to a database",
     "  Q       return here from anywhere",
     "  ?       full keymap reference    ;     ···",
+    "",
+    "  :GripStart       open the demo database",
+    "  :GripHome        return to this screen",
+    "  :che dadbod-grip verify your setup",
     "",
     "  ── Connection strings ──────────────────────────",
     "  postgresql://user:pass@host:5432/dbname",
@@ -1301,9 +1314,11 @@ function M.open_welcome()
     require("dadbod-grip.ai").ask(cur_conn())
   end, "AI SQL assistant")
 
-  -- 1-3: surface navigation from welcome screen
+  -- 1-9: surface navigation from welcome screen
   wmap("1", function()
-    require("dadbod-grip.schema").toggle(cur_conn())
+    local conn = cur_conn()
+    if not conn then do_connect(); return end
+    require("dadbod-grip.schema").toggle(conn)
   end, "Schema sidebar")
   wmap("2", function()
     local conn = cur_conn()
@@ -1318,6 +1333,20 @@ function M.open_welcome()
     if not conn then do_connect(); return end
     require("dadbod-grip.picker").pick_table(conn, function(t) M.open(t, conn) end)
   end, "Table picker")
+  wmap("4", function()
+    local conn = cur_conn()
+    if not conn then do_connect(); return end
+    require("dadbod-grip.er_diagram").toggle(conn)
+  end, "ER diagram")
+  for _, n in ipairs({ "5", "6", "7", "8", "9" }) do
+    local view_map = { ["5"]="stats", ["6"]="columns", ["7"]="fk", ["8"]="indexes", ["9"]="constraints" }
+    local vname = view_map[n]
+    wmap(n, function()
+      local conn = cur_conn()
+      if not conn then do_connect(); return end
+      require("dadbod-grip.picker").pick_table(conn, function(t) M.open(t, conn, { view = vname }) end)
+    end, vname .. " view")
+  end
 
   -- Dev secret: Chonk at the center of the grip vortex
   wmap(";", function()
@@ -1390,7 +1419,7 @@ function M.open_welcome()
     vim.keymap.set("n", "<CR>",  close_secret, { buffer = sbuf, silent = true })
     vim.keymap.set("n", ";",     close_secret, { buffer = sbuf, silent = true })
     vim.api.nvim_create_autocmd("WinLeave", {
-      buffer = sbuf, once = true,
+      group = _ag, buffer = sbuf, once = true,
       callback = function() pcall(vim.api.nvim_win_close, swin, true) end,
     })
   end, "Dev secret")
@@ -1406,8 +1435,28 @@ function M.open_welcome()
 end
 
 -- ── setup ─────────────────────────────────────────────────────────────────
+
+---@class DadbodGripAIOpts
+---@field provider? string   "anthropic"|"openai"|"gemini"|"ollama"|nil (auto-detect)
+---@field model? string      Override the default model name
+---@field ollama_url? string Ollama base URL (default: http://localhost:11434)
+
+---@class DadbodGripOpts
+---@field limit? integer         Rows per page (default: 100)
+---@field max_col_width? integer Max display width per column (default: 40)
+---@field timeout? integer       Query timeout in ms (default: 10000)
+---@field ai? DadbodGripAIOpts   AI SQL generation config
+
+---Setup dadbod-grip with user options.
+---@param opts? DadbodGripOpts
 function M.setup(opts)
   opts = opts or {}
+  vim.validate({
+    limit         = { opts.limit,         "number", true },
+    max_col_width = { opts.max_col_width,  "number", true },
+    timeout       = { opts.timeout,        "number", true },
+    ai            = { opts.ai,             "table",  true },
+  })
   OPTS.limit        = opts.limit        or 100
   OPTS.max_col_width = opts.max_col_width or 40
   OPTS.timeout      = opts.timeout      or 10000
@@ -1731,6 +1780,7 @@ function M.setup(opts)
     end
 
     vim.api.nvim_create_autocmd("WinLeave", {
+      group  = _ag,
       buffer = explain_buf,
       once = true,
       callback = function() vim.schedule(close) end,

@@ -8,6 +8,8 @@
 
 local M = {}
 
+local _ag = vim.api.nvim_create_augroup("DadbodGripER", { clear = true })
+
 local _bufnr = nil
 local _winid  = nil
 local _ns     = vim.api.nvim_create_namespace("grip_er")
@@ -636,6 +638,7 @@ function M.show(url, scroll_to)
 
   -- WinLeave: close when focus leaves
   vim.api.nvim_create_autocmd("WinLeave", {
+    group  = _ag,
     buffer = bufnr, once = true,
     callback = function() close_er() end,
   })

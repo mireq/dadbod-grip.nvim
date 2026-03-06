@@ -7,6 +7,8 @@ local sql  = require("dadbod-grip.sql")
 
 local M = {}
 
+local _ag = vim.api.nvim_create_augroup("DadbodGripProperties", { clear = true })
+
 -- ── format helpers ──────────────────────────────────────────────────────────
 
 local function format_size(bytes)
@@ -250,6 +252,7 @@ function M.open(table_name, url, grip_win)
   end
 
   vim.api.nvim_create_autocmd("WinLeave", {
+    group  = _ag,
     buffer = popup_buf,
     once = true,
     callback = function() vim.schedule(close) end,

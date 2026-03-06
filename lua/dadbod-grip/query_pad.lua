@@ -4,6 +4,7 @@
 
 local M = {}
 
+local _ag = vim.api.nvim_create_augroup("DadbodGripQueryPad", { clear = true })
 local _pad_bufnr = nil
 
 --- Register completion keymaps for the query pad buffer.
@@ -114,6 +115,7 @@ local function ensure_buf(url)
 
   -- BufWriteCmd: save query with :GripSave
   vim.api.nvim_create_autocmd("BufWriteCmd", {
+    group  = _ag,
     buffer = _pad_bufnr,
     callback = function()
       local saved = require("dadbod-grip.saved")
@@ -126,6 +128,7 @@ local function ensure_buf(url)
   -- autocmds, so our buffer-local keymaps are always registered last and win.
   local bufnr_ref = _pad_bufnr
   vim.api.nvim_create_autocmd("BufEnter", {
+    group  = _ag,
     buffer = _pad_bufnr,
     callback = function()
       vim.schedule(function() setup_completion_keymaps(bufnr_ref) end)

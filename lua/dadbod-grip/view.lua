@@ -77,30 +77,40 @@ local BOT_MID = "╧"
 local TOP_MID = "╤"
 
 -- ── highlight group setup ──────────────────────────────────────────────────
+-- Groups are re-applied on ColorScheme so they survive :colorscheme switches.
+local _hl_ag = vim.api.nvim_create_augroup("DadbodGripHL", { clear = true })
+
 local function ensure_highlights()
-  -- All grip-owned groups use hi! (unconditional) so colors apply reliably
-  -- on re-source, colorscheme changes, and first load.
-  -- Staged groups have guibg; conditional groups are fg-only.
-  vim.cmd("hi! GripHeader    gui=bold cterm=bold")
-  vim.cmd("hi! GripNull      gui=italic ctermfg=243 guifg=#6c7086")
-  vim.cmd("hi! GripModified  gui=bold ctermfg=177 guifg=#c084fc ctermbg=236 guibg=#1a0a30")
-  vim.cmd("hi! GripDeleted   gui=strikethrough ctermfg=203 guifg=#f38ba8 ctermbg=236 guibg=#2d1418")
-  vim.cmd("hi! GripInserted  gui=bold ctermfg=113 guifg=#a6e3a1 ctermbg=236 guibg=#162d18")
-  -- Staged NULL: peach/flamingo fg: signals "value cleared" (distinct from red=deleted, violet=modified)
-  vim.cmd("hi! GripNullStaged gui=bold ctermfg=216 guifg=#fab387 ctermbg=236 guibg=#2d1800")
-  vim.cmd("hi! GripReadonly  gui=italic ctermfg=243 guifg=#6c7086")
-  vim.cmd("hi! GripBorder    gui=bold ctermfg=147 guifg=#cba6f7")
-  vim.cmd("hi! GripStatusOk  gui=bold ctermfg=229 guifg=#f9e2af")
-  vim.cmd("hi! GripStatusChg gui=bold ctermfg=229 guifg=#f9e2af")
-  vim.cmd("hi! GripNegative  gui=bold ctermfg=203 guifg=#f38ba8")
-  vim.cmd("hi! GripBoolTrue  gui=bold ctermfg=113 guifg=#a6e3a1")
-  vim.cmd("hi! GripBoolFalse gui=bold ctermfg=203 guifg=#f38ba8")
-  vim.cmd("hi! GripDatePast  gui=italic ctermfg=243 guifg=#6c7086")
-  vim.cmd("hi! GripUrl       gui=underline ctermfg=117 guifg=#89b4fa")
-  vim.cmd("hi! GripWatch     gui=bold ctermfg=117 guifg=#89b4fa")
-  vim.cmd("hi! GripColHighlight ctermbg=237 guibg=#313244")
+  local hl = vim.api.nvim_set_hl
+  hl(0, "GripHeader",       { bold = true })
+  hl(0, "GripNull",         { italic = true, fg = "#6c7086", ctermfg = 243 })
+  -- Staged groups carry guibg to visually distinguish pending mutations.
+  -- Staged NULL: peach/flamingo fg signals "value cleared" (distinct from red=deleted, violet=modified)
+  hl(0, "GripModified",     { bold = true,         fg = "#c084fc", ctermfg = 177, bg = "#1a0a30", ctermbg = 236 })
+  hl(0, "GripDeleted",      { strikethrough = true, fg = "#f38ba8", ctermfg = 203, bg = "#2d1418", ctermbg = 236 })
+  hl(0, "GripInserted",     { bold = true,         fg = "#a6e3a1", ctermfg = 113, bg = "#162d18", ctermbg = 236 })
+  hl(0, "GripNullStaged",   { bold = true,         fg = "#fab387", ctermfg = 216, bg = "#2d1800", ctermbg = 236 })
+  hl(0, "GripReadonly",     { italic = true,       fg = "#6c7086", ctermfg = 243 })
+  hl(0, "GripBorder",       { bold = true,         fg = "#cba6f7", ctermfg = 147 })
+  hl(0, "GripStatusOk",     { bold = true,         fg = "#f9e2af", ctermfg = 229 })
+  hl(0, "GripStatusChg",    { bold = true,         fg = "#f9e2af", ctermfg = 229 })
+  hl(0, "GripNegative",     { bold = true,         fg = "#f38ba8", ctermfg = 203 })
+  hl(0, "GripBoolTrue",     { bold = true,         fg = "#a6e3a1", ctermfg = 113 })
+  hl(0, "GripBoolFalse",    { bold = true,         fg = "#f38ba8", ctermfg = 203 })
+  hl(0, "GripDatePast",     { italic = true,       fg = "#6c7086", ctermfg = 243 })
+  hl(0, "GripUrl",          { underline = true,    fg = "#89b4fa", ctermfg = 117 })
+  hl(0, "GripWatch",        { bold = true,         fg = "#89b4fa", ctermfg = 117 })
+  hl(0, "GripColHighlight", { bg = "#313244", ctermbg = 237 })
 end
 ensure_highlights() -- define groups on module load so welcome screen can use them
+vim.api.nvim_create_autocmd("ColorScheme", {
+  group    = _hl_ag,
+  callback = ensure_highlights,
+})
+
+-- Module-level augroup for all buffer/window lifecycle autocmds in this module.
+-- Created once at require time with clear=true so re-sourcing never doubles handlers.
+local _ag = vim.api.nvim_create_augroup("DadbodGripView", { clear = true })
 
 -- ── column width calculation ──────────────────────────────────────────────
 local function calc_col_widths(columns, rows, max_width)
@@ -1092,6 +1102,7 @@ function M.open(state, url, query_sql, opts)
 
   -- Cleanup session on buffer wipe (also stops watch timer)
   vim.api.nvim_create_autocmd("BufWipeout", {
+    group  = _ag,
     buffer = bufnr,
     once = true,
     callback = function()
@@ -1385,6 +1396,7 @@ local function open_info_float(grip_win, lines, float_opts)
   end
 
   vim.api.nvim_create_autocmd("WinLeave", {
+    group  = _ag,
     buffer = popup_buf,
     once = true,
     callback = function() vim.schedule(close) end,
@@ -2961,6 +2973,7 @@ function M._setup_keymaps(bufnr)
     vim.keymap.set("n", "<Esc>", close_picker, bopts)
 
     vim.api.nvim_create_autocmd("WinLeave", {
+      group  = _ag,
       buffer = pbuf, once = true,
       callback = function() close_picker() end,
     })
@@ -4397,6 +4410,7 @@ function M._setup_keymaps(bufnr)
 
   -- ── column highlight (CursorMoved) ────────────────────────────────────────
   vim.api.nvim_create_autocmd("CursorMoved", {
+    group  = _ag,
     buffer = bufnr,
     callback = function()
       local session = M._sessions[bufnr]
@@ -4614,7 +4628,7 @@ function M.show_help(opts)
         "  gl        Toggle live SQL preview",
         "  T         Toggle column type annotations",
         "",
-        "  Colors: modified=blue  deleted=red  inserted=green",
+        "  Colors: modified=violet  deleted=red  inserted=green",
         "          negative=red  true=green  false=red",
         "          past-date=dim  url=underline",
         "",
@@ -4677,6 +4691,7 @@ function M.show_help(opts)
     end
 
     vim.api.nvim_create_autocmd("WinLeave", {
+      group  = _ag,
       buffer = popup_buf,
       once = true,
       callback = function() vim.schedule(close) end,

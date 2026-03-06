@@ -31,6 +31,7 @@ CONTENTS                                                    *grip-contents*
   22. AI SQL Generation ........ |grip-ai|
   23. Cross-DB Federation ...... |grip-federation|
   24. S3 and Remote Files ....... |grip-s3-files|
+  25. Health Check .............. |grip-health|
 
 ==============================================================================
 1. INTRODUCTION                                          *grip-introduction*
@@ -67,7 +68,9 @@ Quick start: >
 lazy.nvim (recommended): >lua
   {
     "joryeugene/dadbod-grip.nvim",
-    cmd = { "Grip", "GripSchema", "GripTables", "GripQuery", "GripConnect" },
+    version = "*",
+    cmd = { "Grip", "GripSchema", "GripTables", "GripQuery", "GripConnect",
+            "GripStart", "GripHome" },
     keys = {
       { "<leader>lg", function() require("dadbod-grip").open_smart() end,
         desc = "Grip: Open grid" },
@@ -79,9 +82,9 @@ lazy.nvim (recommended): >lua
     opts = {},
   }
 <
-Recommended extras: >lua
-  -- SQL completion in query pad (auto-completes table/column names)
-  { "kristijanhusak/vim-dadbod-completion", ft = { "sql" } }
+SQL completion (nvim-cmp) is built in. No additional plugins required.
+To verify your setup after installation: >
+  :checkhealth dadbod-grip
 <
 packer.nvim: >lua
   use {
@@ -263,6 +266,18 @@ All commands are global and available after the plugin loads.
   For s3:// prefixes (no file extension), opens the query pad pre-filled
   with a glob() query. For specific files, opens an editable grid directly.
   Requires DuckDB as the active connection for file and S3 access.
+
+                                                               *:GripStart*
+:GripStart
+  Open the built-in demo database (Softrear Inc. Analyst Portal). Creates
+  a pre-seeded SQLite database in the plugin data directory and opens the
+  schema browser. A fast way to try every feature without a real database.
+
+                                                                *:GripHome*
+:GripHome
+  Return to the dadbod-grip welcome screen from anywhere. Shows the keymap
+  reference, connection string examples, and navigation shortcuts. Also
+  reachable with Q from any grip buffer.
 
 ==============================================================================
 6. KEYBINDINGS                                           *grip-keybindings*
@@ -512,11 +527,12 @@ markers for primary keys and foreign keys.
 11. QUERY PAD                                             *grip-query-pad*
 
 Open with `:GripQuery` or `q` from a grid buffer. Creates a scratch SQL
-buffer with filetype=sql (enables vim-dadbod-completion if installed).
+buffer with filetype=sql and built-in nvim-cmp completion.
 
 Query pad keymaps:
   <C-CR>          Execute buffer contents into a grip grid (normal/insert)
   <C-CR>          Execute visual selection into a grip grid (visual mode)
+  <C-Space>       Trigger SQL completion manually
   <C-s>           Save query with :GripSave
   gq              Load saved query (picker with SQL preview)
   gA              AI SQL generation (natural language)
@@ -526,8 +542,9 @@ Query pad keymaps:
   gb              Schema browser (focus if open; close from inside)
   gC / <C-g>      Switch database connection
 
-The query pad sets b:db to the current connection URL, which enables
-vim-dadbod-completion for table and column name auto-completion.
+SQL completion is built in: table names, column names, aliases, and SQL
+keywords complete automatically as you type. The nvim-cmp source name is
+`dadbod_grip`. vim-dadbod-completion is not required.
 
 ==============================================================================
 12. SAVED QUERIES                                      *grip-saved-queries*
@@ -849,6 +866,36 @@ Cross-federation with remote files: >
 For S3 access, set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in your
 environment. Public buckets work without credentials.
 DuckDB's httpfs extension installs automatically on first use.
+
+==============================================================================
+25. HEALTH CHECK                                              *grip-health*
+
+Run the built-in health checker to verify your installation: >
+  :checkhealth dadbod-grip
+<
+
+Checks performed:
+
+  Neovim version     Confirms Neovim >= 0.10 is installed.
+
+  Database CLIs      Checks psql, sqlite3, mysql, and duckdb are in PATH.
+                     Reports WARN for any missing (only the adapters you use
+                     are required).
+
+  AI providers       Checks ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY
+                     environment variables and ollama executable.
+                     Reports WARN if none are set (AI features will be
+                     disabled but everything else works normally).
+
+Example output: >
+  dadbod-grip
+    OK  Neovim >= 0.10
+    OK  psql found
+    OK  sqlite3 found
+    WARN  mysql not found (required for that adapter)
+    OK  duckdb found
+    OK  Anthropic API key set (ANTHROPIC_API_KEY)
+<
 
 ==============================================================================
 vim:tw=78:ts=8:ft=help:norl:

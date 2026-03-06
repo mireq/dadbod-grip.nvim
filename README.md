@@ -13,6 +13,7 @@ d   ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝
 <p>
 <a href="https://github.com/joryeugene/dadbod-grip.nvim/blob/main/LICENSE"><img src="https://img.shields.io/github/license/joryeugene/dadbod-grip.nvim.svg" alt="MIT License"></a>&nbsp;
 <img src="https://img.shields.io/badge/Neovim-0.10%2B-green.svg" alt="Neovim 0.10+">&nbsp;
+<a href="https://github.com/joryeugene/dadbod-grip.nvim/actions/workflows/test.yml"><img src="https://github.com/joryeugene/dadbod-grip.nvim/actions/workflows/test.yml/badge.svg" alt="Tests"></a>&nbsp;
 </p>
 <b>Editable database grids for Neovim.</b><br>
 Connect to PostgreSQL, MySQL, SQLite, DuckDB, or MotherDuck and edit tables like Vim buffers.
@@ -29,7 +30,7 @@ Connect to PostgreSQL, MySQL, SQLite, DuckDB, or MotherDuck and edit tables like
 |---|---|---|
 | **Inline cell editing** popup editor | **Data profiling** sparkline distributions | **FK navigation** breadcrumb trail |
 | **Batch edit** visual-mode multi-row ops | **Query Doctor** plain-English EXPLAIN | **DDL** create · rename · drop via UI |
-| **Mutation preview** full SQL before apply | **Visual staging** blue · green · red rows | **File as table** Parquet · CSV · remote URLs |
+| **Mutation preview** full SQL before apply | **Visual staging** violet · green · red rows | **File as table** Parquet · CSV · remote URLs |
 | **Transaction undo** reverse committed changes | **Live SQL preview** float updates as you stage | **AI SQL** Anthropic · OpenAI · Gemini · Ollama |
 | **Schema browser** `gb` sidebar, PK/FK markers | **Data diff** `gD` compare tables by primary key | **Multi-DB** PostgreSQL · SQLite · MySQL · DuckDB · MotherDuck |
 | **Cross-DB federation** `:GripAttach` Postgres · MySQL · SQLite · MotherDuck in one DuckDB session | **Column filter builder** `gF` with operators and wildcards | **Schema grouping** sidebar sections per attached database |
@@ -50,7 +51,7 @@ An example database is included. `:GripStart` opens it with seventeen tables and
 { "joryeugene/dadbod-grip.nvim", version = "*" }
 ```
 
-Then `:GripConnect` to pick your database. That's it. Schema sidebar + query pad open automatically.
+Then `:checkhealth dadbod-grip` to verify your setup, `:GripStart` to explore the demo database, or `:GripConnect` to pick your own. Schema sidebar + query pad open automatically.
 
 ### Connection strings
 
@@ -126,7 +127,7 @@ work without credentials.
 
 ### Data Editing
 - **Inline cell editing** with a popup editor, NULL handling, and type-aware display.
-- **Visual change staging** with color-coded rows (teal=modified, red=deleted, green=inserted).
+- **Visual change staging** with color-coded rows (violet=modified, red=deleted, green=inserted).
 - **Pure SQL generation** with live preview before applying changes.
 - **Transaction safety** wraps all DML in BEGIN/COMMIT with ROLLBACK on error.
 - **Batch editing** in visual mode to set, delete, or NULL multiple rows at once.
@@ -149,6 +150,7 @@ work without credentials.
 - **Schema browser** via `:GripSchema` or `gb` showing a sidebar tree with columns, types, and PK/FK markers. `gb` opens/focuses the browser from any buffer; pressing `gb` from inside closes it.
 - **Table picker** via `:GripTables` or `gT` / `gt` providing a fuzzy finder with column preview. Available from all three buffers: grid, query pad, and sidebar. In the sidebar, `go` opens the table under cursor with `ORDER BY created_at / PK DESC` so the latest rows appear first.
 - **SQL query pad** via `:GripQuery` or `q` opening a scratch buffer that pipes results into editable grids.
+- **Built-in SQL completion** (nvim-cmp source `dadbod_grip`) with table names, column names, SQL alias tracking, and keywords. Triggers automatically while typing or via `<C-Space>`. No additional plugins required.
 - **Saved queries** via `:GripSave` and `:GripLoad` persisting to project-local `.grip/queries/` files.
 - **Connection profiles** via `:GripConnect` or `gC` storing connections in `.grip/connections.json` with `g:dbs` backward compatibility. Connections auto-persist globally (`~/.grip/connections.json`) so they're available from any project. Connecting opens the full workspace (schema sidebar + query pad) automatically.
 - **Data diff** via `:GripDiff` or `gD` comparing two tables by primary key with color-coded change highlighting. Auto-switches to compact layout on narrow terminals (<120 cols), toggle with `gv`.

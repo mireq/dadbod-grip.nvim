@@ -6,6 +6,8 @@ local sql  = require("dadbod-grip.sql")
 
 local M = {}
 
+local _ag = vim.api.nvim_create_augroup("DadbodGripDDL", { clear = true })
+
 -- ── helpers ─────────────────────────────────────────────────────────────────
 
 local function confirm_ddl(title, ddl_sql, callback)
@@ -43,6 +45,7 @@ local function confirm_ddl(title, ddl_sql, callback)
   end
 
   vim.api.nvim_create_autocmd("WinLeave", {
+    group  = _ag,
     buffer = popup_buf,
     once = true,
     callback = function() vim.schedule(close) end,
@@ -100,6 +103,7 @@ local function destructive_confirm(title, ddl_sql, confirm_word, callback)
   end
 
   vim.api.nvim_create_autocmd("WinLeave", {
+    group  = _ag,
     buffer = popup_buf,
     once = true,
     callback = function() vim.schedule(close) end,

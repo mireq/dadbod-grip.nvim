@@ -6,6 +6,8 @@
 
 local M = {}
 
+local _ag = vim.api.nvim_create_augroup("DadbodGripCompletion", { clear = true })
+
 local CACHE_TTL = 300  -- 5 minutes
 
 -- _cache[url] = { tables = { name -> [{column_name, data_type, is_nullable}] }, time }
@@ -396,6 +398,7 @@ function M.setup_auto_complete(bufnr, url_fn)
   -- native popup. BufEnter fires before insert mode, so the disable is in place
   -- before TextChangedI. No-op when nvim-cmp is not installed.
   vim.api.nvim_create_autocmd("BufEnter", {
+    group  = _ag,
     buffer = bufnr,
     callback = function()
       pcall(function() require("cmp").setup.buffer({ enabled = false }) end)
@@ -403,6 +406,7 @@ function M.setup_auto_complete(bufnr, url_fn)
   })
 
   vim.api.nvim_create_autocmd("TextChangedI", {
+    group  = _ag,
     buffer = bufnr,
     callback = function()
       -- Defer past all TextChangedI handlers (blink, cmp, etc.) so their popups
