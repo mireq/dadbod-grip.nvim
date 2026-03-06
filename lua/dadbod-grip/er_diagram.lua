@@ -35,6 +35,9 @@ local function close_er()
   end
 end
 
+M.is_open = is_open
+M.close   = close_er
+
 -- ── DAG depth ────────────────────────────────────────────────────────────────
 
 --- Compute depth for each table. depth[t] = 0 if t has no outgoing FKs.

@@ -294,11 +294,13 @@ local function setup_keymaps(bufnr, url)
 
   -- 1: schema sidebar (primary, not in sidebar right now)
   vim.keymap.set("n", "1", function()
+    require("dadbod-grip.view").close_all_floats(nil)
     require("dadbod-grip.schema").toggle(cur_url())
   end, { buffer = bufnr, silent = true, desc = "Grip: schema sidebar" })
 
   -- 2: query history (secondary, already in query pad)
   vim.keymap.set("n", "2", function()
+    require("dadbod-grip.view").close_all_floats(nil)
     require("dadbod-grip.history").pick(function(sql_content)
       vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, vim.split(sql_content, "\n"))
       vim.bo[bufnr].modified = false
@@ -308,6 +310,7 @@ local function setup_keymaps(bufnr, url)
   -- 3: jump to grid (primary), or table picker if no grid is open
   vim.keymap.set("n", "3", function()
     local view_mod = require("dadbod-grip.view")
+    view_mod.close_all_floats(nil)
     local win = view_mod.find_content_win()
     if win then
       vim.api.nvim_set_current_win(win)
@@ -323,11 +326,12 @@ local function setup_keymaps(bufnr, url)
   for n = 4, 9 do
     local view_name = VIEW_MAP[n]
     vim.keymap.set("n", tostring(n), function()
+      local view_mod = require("dadbod-grip.view")
+      view_mod.close_all_floats(nil)
       if view_name == "er_diagram" then
         require("dadbod-grip.er_diagram").toggle(cur_url())
         return
       end
-      local view_mod = require("dadbod-grip.view")
       local win = view_mod.find_content_win()
       if win then
         local gbuf = vim.api.nvim_win_get_buf(win)

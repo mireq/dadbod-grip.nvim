@@ -76,12 +76,14 @@ function M.open(opts)
 
   local popup_buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = popup_buf })
+  vim.b[popup_buf].grip_owned_float = true
 
   local preview_buf, preview_win
   if preview_fn then
     preview_buf = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = preview_buf })
     vim.bo[preview_buf].filetype = "sql"
+    vim.b[preview_buf].grip_owned_float = true
   end
 
   -- ── dimension helpers ──

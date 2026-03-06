@@ -11,6 +11,7 @@ o  ╚██████╔╝██║  ██║██║██║
 d   ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝
 </pre>
 <p>
+<a href="https://joryeugene.github.io/dadbod-grip-web/"><img src="https://img.shields.io/badge/docs-website-4ade80.svg" alt="Docs"></a>&nbsp;
 <a href="https://github.com/joryeugene/dadbod-grip.nvim/blob/main/LICENSE"><img src="https://img.shields.io/github/license/joryeugene/dadbod-grip.nvim.svg" alt="MIT License"></a>&nbsp;
 <img src="https://img.shields.io/badge/Neovim-0.10%2B-green.svg" alt="Neovim 0.10+">&nbsp;
 <a href="https://github.com/joryeugene/dadbod-grip.nvim/actions/workflows/test.yml"><img src="https://github.com/joryeugene/dadbod-grip.nvim/actions/workflows/test.yml/badge.svg" alt="Tests"></a>&nbsp;

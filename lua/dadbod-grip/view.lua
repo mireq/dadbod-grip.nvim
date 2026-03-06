@@ -844,6 +844,27 @@ function M._close_live_sql_float(session)
   session._live_sql_buf = nil
 end
 
+--- Close every grip-owned floating window.
+--- Called at the start of every 1-9 surface keymap so pressing any number key
+--- instantly dismisses open pickers / floats before the target surface opens.
+--- @param session? table  grid session; may be nil (e.g. called from query pad)
+function M.close_all_floats(session)
+  if session then M._close_live_sql_float(session) end
+  local ok, er = pcall(require, "dadbod-grip.er_diagram")
+  if ok and er.is_open and er.is_open() then pcall(er.close) end
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_is_valid(win) then
+      local cfg = vim.api.nvim_win_get_config(win)
+      if cfg.relative ~= "" then
+        local buf = vim.api.nvim_win_get_buf(win)
+        if vim.b[buf] and vim.b[buf].grip_owned_float then
+          pcall(vim.api.nvim_win_close, win, true)
+        end
+      end
+    end
+  end
+end
+
 -- ── cursor → cell mapping ─────────────────────────────────────────────────
 -- M.get_cell(bufnr) → {row_idx, col_name, col_idx, value} | nil
 function M.get_cell(bufnr)
@@ -4338,13 +4359,16 @@ function M._setup_keymaps(bufnr)
   -- ── tab view keymaps (1-9) ───────────────────────────────────────────────
   -- 1: schema sidebar (already in grid = always primary: open/focus sidebar)
   map("1", function()
-    local s_url = M._sessions[bufnr] and M._sessions[bufnr].url
+    local _s = M._sessions[bufnr]
+    M.close_all_floats(_s)
+    local s_url = _s and _s.url
     require("dadbod-grip.schema").toggle(s_url)
   end, "Schema sidebar (key 1)")
 
   -- 2: open query pad (pre-filled with current query)
   map("2", function()
     local session_2 = M._sessions[bufnr]
+    M.close_all_floats(session_2)
     local s_url = session_2 and session_2.url
     local initial_sql
     if session_2 and session_2.query_spec then
@@ -4358,6 +4382,7 @@ function M._setup_keymaps(bufnr)
   -- 3: grid/records (already in non-records view = return to records; already on records = table picker)
   map("3", function()
     local session_3 = M._sessions[bufnr]
+    M.close_all_floats(session_3)
     local cv = session_3 and session_3.current_view
     if cv and cv ~= "records" then
       M.switch_view(bufnr, "records")
@@ -4377,6 +4402,7 @@ function M._setup_keymaps(bufnr)
       if view_name == "er_diagram" then
         map(tostring(n), function()
           local session = M._sessions[bufnr]
+          M.close_all_floats(session)
           local s_url = session and session.url
           if not s_url then s_url = require("dadbod-grip.db").get_url() end
           if not s_url then vim.notify("ER Diagram: no database connection", vim.log.levels.WARN); return end
@@ -4384,6 +4410,7 @@ function M._setup_keymaps(bufnr)
         end, "ER diagram (key 4)")
       else
         map(tostring(n), function()
+          M.close_all_floats(M._sessions[bufnr])
           M.switch_view(bufnr, view_name)
         end, "View: " .. (VIEW_LABELS[view_name] or view_name))
       end

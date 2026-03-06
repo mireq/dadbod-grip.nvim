@@ -44,6 +44,30 @@ local function build_attach_prefix(url)
   return table.concat(parts, "\n") .. "\n"
 end
 
+--- Split a DuckDB table name into (catalog, schema, table).
+--- Distinguishes attached catalogs from native schemas by checking _attachments.
+---   "supplier.shipments"  (supplier is an ATTACH alias) -> ("supplier", "main", "shipments")
+---   "analytics.events"    (analytics is a native schema) -> (nil, "analytics", "events")
+---   "employees"           (plain name)                   -> (nil, "main", "employees")
+--- Callers use:
+---   local is_prefix = catalog and (catalog .. ".") or ""   -- for information_schema
+---   local db_filter = catalog and ("database_name = '" .. catalog .. "' AND ") or ""  -- for system fns
+local function split_catalog_schema_table(url, table_name)
+  local prefix, tbl = table_name:match("^([^.]+)%.(.+)$")
+  if not prefix then
+    return nil, "main", table_name
+  end
+  -- Check if prefix is a known attachment alias (makes it a catalog, not a schema)
+  local atts = _attachments[url] or {}
+  for _, att in ipairs(atts) do
+    if att.alias == prefix then
+      return prefix, "main", tbl
+    end
+  end
+  -- Not an attachment: it's a native DuckDB schema in the main catalog
+  return nil, prefix, tbl
+end
+
 --- Extract file path from dadbod's duckdb: URL format.
 --- "duckdb:path/to/db.duckdb"    -> "path/to/db.duckdb"
 --- "duckdb:/absolute/path.db"    -> "/absolute/path.db"
@@ -168,23 +192,20 @@ function M.get_primary_keys(table_name, url)
   local db_path = extract_path(url)
   if not db_path then return {}, "Invalid DuckDB URL: " .. url end
 
-  local schema, tbl = table_name:match("^([^.]+)%.(.+)$")
-  if not schema then
-    schema = "main"
-    tbl = table_name
-  end
+  local catalog, schema, tbl = split_catalog_schema_table(url, table_name)
+  local is_prefix = catalog and (catalog .. ".") or ""
 
   local sql_str = string.format([[
     SELECT kcu.column_name
-    FROM information_schema.table_constraints tc
-    JOIN information_schema.key_column_usage kcu
+    FROM %sinformation_schema.table_constraints tc
+    JOIN %sinformation_schema.key_column_usage kcu
       ON tc.constraint_name = kcu.constraint_name
       AND tc.table_schema = kcu.table_schema
     WHERE tc.constraint_type = 'PRIMARY KEY'
       AND tc.table_schema = '%s'
       AND tc.table_name = '%s'
     ORDER BY kcu.ordinal_position
-  ]], schema:gsub("'", "''"), tbl:gsub("'", "''"))
+  ]], is_prefix, is_prefix, schema:gsub("'", "''"), tbl:gsub("'", "''"))
 
   local stdout, stderr, code = duckdb(db_path, sql_str, nil, url)
   if code ~= 0 then
@@ -207,11 +228,8 @@ function M.get_column_info(table_name, url)
   local db_path = extract_path(url)
   if not db_path then return nil, "Invalid DuckDB URL: " .. url end
 
-  local schema, tbl = table_name:match("^([^.]+)%.(.+)$")
-  if not schema then
-    schema = "main"
-    tbl = table_name
-  end
+  local catalog, schema, tbl = split_catalog_schema_table(url, table_name)
+  local is_prefix = catalog and (catalog .. ".") or ""
 
   local info_sql = string.format([[
     SELECT
@@ -221,8 +239,8 @@ function M.get_column_info(table_name, url)
       COALESCE(c.column_default, '') AS column_default,
       COALESCE(
         (SELECT string_agg(tc.constraint_type, ', ')
-         FROM information_schema.key_column_usage kcu
-         JOIN information_schema.table_constraints tc
+         FROM %sinformation_schema.key_column_usage kcu
+         JOIN %sinformation_schema.table_constraints tc
            ON tc.constraint_name = kcu.constraint_name
            AND tc.table_schema = kcu.table_schema
          WHERE kcu.table_schema = '%s'
@@ -230,12 +248,12 @@ function M.get_column_info(table_name, url)
            AND kcu.column_name = c.column_name),
         ''
       ) AS constraints
-    FROM information_schema.columns c
+    FROM %sinformation_schema.columns c
     WHERE c.table_schema = '%s'
       AND c.table_name = '%s'
     ORDER BY c.ordinal_position
-  ]], schema:gsub("'", "''"), tbl:gsub("'", "''"),
-      schema:gsub("'", "''"), tbl:gsub("'", "''"))
+  ]], is_prefix, is_prefix, schema:gsub("'", "''"), tbl:gsub("'", "''"),
+      is_prefix, schema:gsub("'", "''"), tbl:gsub("'", "''"))
 
   local stdout, stderr, code = duckdb(db_path, info_sql, nil, url)
   if code ~= 0 then
@@ -262,28 +280,25 @@ function M.get_foreign_keys(table_name, url)
   local db_path = extract_path(url)
   if not db_path then return {}, "Invalid DuckDB URL: " .. url end
 
-  local schema, tbl = table_name:match("^([^.]+)%.(.+)$")
-  if not schema then
-    schema = "main"
-    tbl = table_name
-  end
+  local catalog, schema, tbl = split_catalog_schema_table(url, table_name)
+  local is_prefix = catalog and (catalog .. ".") or ""
 
   local fk_sql = string.format([[
     SELECT
       kcu.column_name,
       kcu2.table_name AS ref_table,
       kcu2.column_name AS ref_column
-    FROM information_schema.referential_constraints rc
-    JOIN information_schema.key_column_usage kcu
+    FROM %sinformation_schema.referential_constraints rc
+    JOIN %sinformation_schema.key_column_usage kcu
       ON rc.constraint_schema = kcu.constraint_schema
       AND rc.constraint_name = kcu.constraint_name
-    JOIN information_schema.key_column_usage kcu2
+    JOIN %sinformation_schema.key_column_usage kcu2
       ON rc.unique_constraint_schema = kcu2.constraint_schema
       AND rc.unique_constraint_name = kcu2.constraint_name
       AND kcu.ordinal_position = kcu2.ordinal_position
     WHERE kcu.table_schema = '%s'
       AND kcu.table_name = '%s'
-  ]], schema:gsub("'", "''"), tbl:gsub("'", "''"))
+  ]], is_prefix, is_prefix, is_prefix, schema:gsub("'", "''"), tbl:gsub("'", "''"))
 
   local stdout, stderr, code = duckdb(db_path, fk_sql, nil, url)
   if code ~= 0 then
@@ -328,24 +343,25 @@ function M.list_tables(url)
   local sql_str
   if has_attachments then
     -- duckdb_tables()/duckdb_views() span all catalogs (including attached databases).
-    -- information_schema.tables only shows the current catalog.
+    -- Include schema_name so native schemas in the main DB are prefixed correctly.
     sql_str = [[
-      SELECT database_name, table_name, 'table' AS ttype
+      SELECT database_name, schema_name, table_name, 'table' AS ttype
       FROM duckdb_tables()
       WHERE internal = false
       UNION ALL
-      SELECT database_name, view_name AS table_name, 'view' AS ttype
+      SELECT database_name, schema_name, view_name AS table_name, 'view' AS ttype
       FROM duckdb_views()
       WHERE internal = false
-      ORDER BY database_name, ttype DESC, table_name
+      ORDER BY database_name, schema_name, ttype DESC, table_name
     ]]
   else
+    -- No attachments: include schema_name to surface native DuckDB schemas.
     sql_str = [[
-      SELECT table_name,
+      SELECT schema_name, table_name,
         CASE table_type WHEN 'BASE TABLE' THEN 'table' ELSE 'view' END AS table_type
       FROM information_schema.tables
-      WHERE table_schema = 'main'
-      ORDER BY table_type DESC, table_name
+      WHERE table_schema NOT IN ('information_schema', 'pg_catalog')
+      ORDER BY table_schema, table_type DESC, table_name
     ]]
   end
 
@@ -392,11 +408,9 @@ function M.get_indexes(table_name, url)
   local db_path = extract_path(url)
   if not db_path then return {}, "Invalid DuckDB URL: " .. url end
 
-  local schema, tbl = table_name:match("^([^.]+)%.(.+)$")
-  if not schema then
-    schema = "main"
-    tbl = table_name
-  end
+  local catalog, schema, tbl = split_catalog_schema_table(url, table_name)
+  local is_prefix = catalog and (catalog .. ".") or ""
+  local db_filter = catalog and string.format("di.database_name = '%s' AND ", catalog:gsub("'", "''")) or ""
 
   local idx_sql = string.format([[
     SELECT
@@ -406,8 +420,8 @@ function M.get_indexes(table_name, url)
            ELSE 'INDEX'
       END AS index_type,
       (SELECT string_agg(column_name, ', ')
-       FROM information_schema.key_column_usage kcu
-       JOIN information_schema.table_constraints tc
+       FROM %sinformation_schema.key_column_usage kcu
+       JOIN %sinformation_schema.table_constraints tc
          ON tc.constraint_name = kcu.constraint_name
          AND tc.table_schema = kcu.table_schema
        WHERE tc.table_schema = di.schema_name
@@ -415,9 +429,9 @@ function M.get_indexes(table_name, url)
          AND tc.constraint_type = CASE WHEN di.is_primary THEN 'PRIMARY KEY' ELSE 'UNIQUE' END
       ) AS columns
     FROM duckdb_indexes() di
-    WHERE di.schema_name = '%s' AND di.table_name = '%s'
+    WHERE %sdi.schema_name = '%s' AND di.table_name = '%s'
     ORDER BY is_primary DESC, index_name
-  ]], schema:gsub("'", "''"), tbl:gsub("'", "''"))
+  ]], is_prefix, is_prefix, db_filter, schema:gsub("'", "''"), tbl:gsub("'", "''"))
 
   local stdout, stderr, code = duckdb(db_path, idx_sql, nil, url)
   if code ~= 0 then
@@ -447,11 +461,8 @@ function M.get_constraints(table_name, url)
   local db_path = extract_path(url)
   if not db_path then return {}, "Invalid DuckDB URL: " .. url end
 
-  local schema, tbl = table_name:match("^([^.]+)%.(.+)$")
-  if not schema then
-    schema = "main"
-    tbl = table_name
-  end
+  local catalog, schema, tbl = split_catalog_schema_table(url, table_name)
+  local db_filter = catalog and string.format("database_name = '%s' AND ", catalog:gsub("'", "''")) or ""
 
   -- duckdb_constraints() returns CHECK and UNIQUE with column lists and expressions
   local sql_str = string.format([[
@@ -463,11 +474,11 @@ function M.get_constraints(table_name, url)
       constraint_type,
       COALESCE(expression, array_to_string(constraint_column_names, ', ')) AS definition
     FROM duckdb_constraints()
-    WHERE schema_name = '%s'
+    WHERE %sschema_name = '%s'
       AND table_name = '%s'
       AND constraint_type IN ('CHECK', 'UNIQUE', 'NOT NULL')
     ORDER BY constraint_type, constraint_name
-  ]], schema:gsub("'", "''"), tbl:gsub("'", "''"))
+  ]], db_filter, schema:gsub("'", "''"), tbl:gsub("'", "''"))
 
   local stdout, stderr, code = duckdb(db_path, sql_str, nil, url)
   if code ~= 0 then
@@ -493,19 +504,16 @@ function M.get_table_stats(table_name, url)
   local db_path = extract_path(url)
   if not db_path then return nil, "Invalid DuckDB URL: " .. url end
 
-  local schema, tbl = table_name:match("^([^.]+)%.(.+)$")
-  if not schema then
-    schema = "main"
-    tbl = table_name
-  end
+  local catalog, schema, tbl = split_catalog_schema_table(url, table_name)
+  local db_filter = catalog and string.format("database_name = '%s' AND ", catalog:gsub("'", "''")) or ""
 
   local stats_sql = string.format([[
     SELECT
       estimated_size,
       0 AS size_bytes
     FROM duckdb_tables()
-    WHERE schema_name = '%s' AND table_name = '%s'
-  ]], schema:gsub("'", "''"), tbl:gsub("'", "''"))
+    WHERE %sschema_name = '%s' AND table_name = '%s'
+  ]], db_filter, schema:gsub("'", "''"), tbl:gsub("'", "''"))
 
   local stdout, stderr, code = duckdb(db_path, stats_sql, nil, url)
   if code ~= 0 then
