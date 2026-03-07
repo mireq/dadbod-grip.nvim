@@ -1100,16 +1100,6 @@ function M.open(state, url, query_sql, opts)
     end
   end
 
-  -- Shrink query pad to fit its content so the grid gets more space
-  for _, qw in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-    local qb = vim.api.nvim_win_get_buf(qw)
-    if vim.api.nvim_buf_get_name(qb):match("grip://query") then
-      local line_count = vim.api.nvim_buf_line_count(qb)
-      vim.api.nvim_win_set_height(qw, math.max(4, math.min(12, line_count + 2)))
-      break
-    end
-  end
-
   -- Render
   M.render(bufnr, state)
 

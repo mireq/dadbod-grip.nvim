@@ -443,7 +443,7 @@ function M.open(url, opts)
           vim.cmd("aboveleft split")
           pad_win = vim.api.nvim_get_current_win()
           vim.api.nvim_win_set_buf(pad_win, bufnr)
-          vim.api.nvim_win_set_height(pad_win, math.max(6, math.min(12, math.floor(vim.o.lines * 0.2))))
+          vim.api.nvim_win_set_height(pad_win, math.max(10, math.floor(vim.o.lines * 0.4)))
         else
           vim.api.nvim_win_set_buf(target_win, bufnr)
           pad_win = target_win
@@ -452,7 +452,7 @@ function M.open(url, opts)
         vim.cmd("botright split")
         pad_win = vim.api.nvim_get_current_win()
         vim.api.nvim_win_set_buf(pad_win, bufnr)
-        vim.api.nvim_win_set_height(pad_win, math.max(6, math.min(12, math.floor(vim.o.lines * 0.2))))
+        vim.api.nvim_win_set_height(pad_win, math.max(10, math.floor(vim.o.lines * 0.4)))
       end
     else
       -- Find a grip grid or welcome window and open above it
@@ -474,7 +474,7 @@ function M.open(url, opts)
       end
       pad_win = vim.api.nvim_get_current_win()
       vim.api.nvim_win_set_buf(pad_win, bufnr)
-      vim.api.nvim_win_set_height(pad_win, math.max(6, math.min(12, math.floor(vim.o.lines * 0.2))))
+      vim.api.nvim_win_set_height(pad_win, math.max(10, math.floor(vim.o.lines * 0.4)))
     end
   end
 
