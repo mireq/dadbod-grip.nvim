@@ -384,17 +384,15 @@ function M.switch(url, name, conn_type, opts)
     resolved_type = "file"
   end
 
-  -- Auto-persist: check LOCAL file only. A connection that lives only in the
-  -- global file still gets added to local so M.touch() can stamp last_used.
+  -- Always upsert when a name is provided. M.add() handles both insert (new
+  -- URL) and rename (existing URL with a stale generic name like "vim.g.db").
+  -- Without this, already_saved=true would skip M.add and the rename never
+  -- happens even when switching with the correct name.
   local local_conns = read_local_connections()
-  local already_saved = false
-  for _, c in ipairs(local_conns) do
-    if c.url == url then already_saved = true; break end
-  end
-  if not already_saved and name and name ~= "" then
+  if name and name ~= "" then
     M.add(name, url)
   end
-  -- Touch AFTER auto-persist so first-time connections get last_used stamped
+  -- Touch AFTER upsert so first-time connections get last_used stamped
   M.touch(url)
 
   if resolved_type == "file" then
