@@ -314,10 +314,21 @@ local function strip_flags(url)
   return vim.trim(url)
 end
 
---- Add a connection to .grip/connections.json.
+--- Add (or rename) a connection in .grip/connections.json.
+--- Upsert by URL: if the URL already exists, updates name and type in place,
+--- preserving last_used and attachments. Prevents accumulation of duplicates
+--- and correctly handles "rename on next switch" (e.g. vim.g.db → proper name).
 function M.add(name, url)
   local clean_url = strip_flags(url)
   local conns = read_local_connections()
+  for _, c in ipairs(conns) do
+    if c.url == clean_url then
+      c.name = name
+      if is_file_url(clean_url) then c.type = "file" end
+      write_file_connections(conns)
+      return
+    end
+  end
   local conn_type = is_file_url(clean_url) and "file" or nil
   table.insert(conns, { name = name, url = clean_url, type = conn_type })
   write_file_connections(conns)

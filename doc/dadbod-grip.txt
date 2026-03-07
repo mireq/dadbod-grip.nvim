@@ -418,7 +418,13 @@ NAVIGATION ~
 EDITING ~
                                                             *grip-editing*
   i / <CR>        Edit cell under cursor (opens float editor)
-                  JSON cell values are pre-filled as formatted JSON
+                  The editor starts in INSERT mode. Press <Esc> to enter
+                  NORMAL mode for full Vim motions (ciw, dw, s, etc.),
+                  then <CR> to save or q/<Esc> to cancel.
+                  <C-c> in INSERT cancels immediately.
+                  JSON cell values open with JSON syntax highlighting and
+                  a taller float. Long values wrap at word boundaries.
+                  Footer updates live: INSERT hint vs NORMAL hint.
   x               Set cell to NULL
   p               Paste clipboard value into cell
   P               Paste multi-line clipboard into consecutive rows

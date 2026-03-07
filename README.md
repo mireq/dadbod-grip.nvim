@@ -205,7 +205,9 @@ Active modes show as a colored badge in the grid's winbar: red `✎ WRITE` and b
 - **Live SQL floating preview** via `gl` shows real-time SQL as you stage changes.
 - **Column type annotations** via `T` overlays type info on headers.
 - **Row view transpose** via `K` shows a vertical column-by-column view of the current row. JSON cells are automatically pretty-printed inline.
-- **JSON-aware editing**: pressing `i`/`<CR>` on a JSON cell pre-fills the editor with formatted, indented JSON for easy inspection and editing.
+- **JSON-aware editing**: pressing `i`/`<CR>` on a JSON cell pre-fills the editor with formatted, indented JSON for easy inspection and editing. The editor opens wider and taller with JSON syntax highlighting.
+- **Full Vim motions in the cell editor**: the editor starts in INSERT mode for quick changes. Press `<Esc>` to drop into NORMAL mode and use any Vim motion (`ciw`, `dw`, `s`, `cW`, etc.). Press `<CR>` or `<C-s>` to save from either mode; press `q` or `<Esc>` from NORMAL to cancel. A live footer shows INSERT vs NORMAL hints.
+- **Word wrap**: long cell values wrap at word boundaries inside the editor float instead of scrolling horizontally.
 
 ## Keybindings
 

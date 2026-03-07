@@ -46,6 +46,17 @@ Action names map 1:1 to the entries in `lua/dadbod-grip/keymaps.lua`.
 | `U` | Undo all (reset to original) |
 | `a` | Apply all staged changes to DB |
 
+**Cell editor float keymaps**
+
+| Key | Mode | Action |
+|-----|------|--------|
+| `<CR>` / `<C-s>` | insert + normal | Save and close |
+| `<Esc>` | insert | Enter normal mode (use ciw, dw, s, etc.) |
+| `<Esc>` / `q` | normal | Cancel (discard changes) |
+| `<C-c>` | insert | Cancel (discard changes) |
+
+The editor starts in INSERT mode. Press `<Esc>` to drop into NORMAL for Vim motions, then `<CR>` to save or `q`/`<Esc>` to cancel. JSON cells open with JSON syntax highlighting and a taller float (up to 25 lines). Long values wrap at word boundaries.
+
 ### Batch Edit (visual mode)
 | Key | Action |
 |-----|--------|

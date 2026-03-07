@@ -45,6 +45,12 @@ Not committed to any release. Roughly ordered by expected impact.
 - [ ] CockroachDB adapter (extend PostgreSQL adapter, `cockroachdb://` scheme, CDC changefeed exposure, multi-region config display in properties)
 - [ ] MongoDB: deprioritized; document model incompatible with grid renderer; needs separate path (JSON tree view, not tabular)
 
+### High Value -- Cell Editor
+- [ ] Timestamp cells: detect ISO timestamp pattern in cell editor, show parsed human-readable date as extmark virtual text below the input line
+- [ ] URL cells: in cell editor NORMAL mode, `gx` opens the URL in the system browser (buf-local keymap, detect http/https prefix)
+- [ ] Markdown columns: auto-set `ft=markdown` in cell editor for columns named body, description, notes, content, text, bio (column name heuristic)
+- [ ] Enum hint: if column has known distinct values (from profile/stats cache), show them as virtual text above the input line in the cell editor
+
 ### Medium Value
 - [ ] Column reordering via keymap (`<` / `>` to shift column left/right)
 - [ ] Inline column resize with `+`/`-` on header row

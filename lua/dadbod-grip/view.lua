@@ -2168,7 +2168,7 @@ function M._setup_keymaps(bufnr)
       end
       M.apply_edit(bufnr, st)
       vim.notify("Set " .. #row_indices .. " cells in " .. col_name, vim.log.levels.INFO)
-    end)
+    end, {})
   end, "Batch edit selected cells")
 
   -- Visual d: toggle delete on all selected rows

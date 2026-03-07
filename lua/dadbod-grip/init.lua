@@ -437,14 +437,24 @@ local function do_edit(bufnr, cell, url)
   -- JSON-aware edit: pretty-print JSON/jsonb before opening the editor.
   -- On save, the (still-valid JSON) value is written back as-is.
   local initial_val = cell.value
+  local is_json = false
   if initial_val and #initial_val > 1 then
     local json_ok, json_decoded = pcall(vim.fn.json_decode, initial_val)
     if json_ok and type(json_decoded) == "table" then
+      is_json = true
       local json_lines = view._json_to_lines and view._json_to_lines(json_decoded)
       if json_lines and #json_lines > 0 then
         initial_val = table.concat(json_lines, "\n")
       end
     end
+  end
+
+  -- JSON cells get a taller/wider float with JSON syntax highlighting
+  local edit_opts = {}
+  if is_json then
+    edit_opts.max_h = 25
+    edit_opts.max_w = 110
+    edit_opts.ft    = "json"
   end
 
   editor.open(prompt, initial_val, function(new_val)
@@ -467,7 +477,7 @@ local function do_edit(bufnr, cell, url)
         pcall(vim.api.nvim_win_set_cursor, w, { pos.line, pos.col })
       end
       -- SafeState fires after ALL pending events are exhausted (after any depth of
-      -- WinEnter→vim.schedule restore chains from external plugins).  once=true
+      -- WinEnter->vim.schedule restore chains from external plugins).  once=true
       -- auto-removes the autocmd so it cannot fire again on the next user action.
       local p_line, p_col = pos.line, pos.col
       vim.api.nvim_create_autocmd("SafeState", {
@@ -481,7 +491,7 @@ local function do_edit(bufnr, cell, url)
         end,
       })
     end
-  end)
+  end, edit_opts)
 end
 
 -- ── parse INSERT VALUES ───────────────────────────────────────────────────
@@ -2219,42 +2229,49 @@ function M.setup(opts)
 
   -- :GripStart: open the Softrear Analyst Portal directly
   vim.api.nvim_create_user_command("GripStart", function()
-    local connections = require("dadbod-grip.connections")
-    local conns = connections.list()
-    for _, c in ipairs(conns) do
-      if c._is_demo then
-        -- Seed on first open
-        if c._demo_sql and c._demo_sql ~= "" then
-          local db_path = c.url:gsub("^duckdb:", ""):gsub("^sqlite:", "")
-          -- Always reseed: demo db is not user data; fresh state picks up schema updates
-          if vim.fn.filereadable(db_path) == 1 then vim.fn.delete(db_path) end
-          vim.fn.mkdir(vim.fn.fnamemodify(db_path, ":h"), "p")
-          local bin = db_path:match("%.duckdb$") and "duckdb" or "sqlite3"
-          vim.fn.system(bin .. " " .. vim.fn.shellescape(db_path)
-            .. " < " .. vim.fn.shellescape(c._demo_sql))
-          -- Seed supplier intel database for federation demo
-          local supplier_sql_files = vim.api.nvim_get_runtime_file("demo/softrear_supplier.sql", false)
-          if #supplier_sql_files > 0 then
-            local grip_dir = vim.fn.getcwd() .. "/.grip"
-            vim.fn.mkdir(grip_dir, "p")
-            local supplier_db = grip_dir .. "/supplier_intel.db"
-            if vim.fn.filereadable(supplier_db) == 1 then vim.fn.delete(supplier_db) end
-            vim.fn.system("sqlite3 " .. vim.fn.shellescape(supplier_db)
-              .. " < " .. vim.fn.shellescape(supplier_sql_files[1]))
-          end
-        end
-
-        connections.switch(c.url)
-        vim.schedule(function()
-          vim.notify(
-            "Softrear Inc. Analyst Portal\xe2\x84\xa2  .  walkthrough: demo/softrear-internal.md",
-            vim.log.levels.INFO
-          )
-        end)
-        return
-      end
+    -- Build the demo URL directly: same logic as connections.list() demo entry.
+    -- Do NOT depend on _is_demo flag — once a user selects softrear it's
+    -- persisted as a regular file connection and _is_demo is no longer set.
+    local sql_files = vim.api.nvim_get_runtime_file("demo/softrear.sql", false)
+    if #sql_files == 0 then
+      vim.notify("Softrear Portal not found. Is the plugin in your runtimepath?", vim.log.levels.WARN)
+      return
     end
-    vim.notify("Softrear Portal not found. Is the plugin in your runtimepath?", vim.log.levels.WARN)
+    local has_duck = vim.fn.executable("duckdb") == 1
+    local ext      = has_duck and ".duckdb" or ".db"
+    local db_path  = vim.fn.stdpath("data") .. "/grip/softrear" .. ext
+    local demo_url = (has_duck and "duckdb:" or "sqlite:") .. db_path
+    local seed     = has_duck and sql_files[1]
+      or (vim.api.nvim_get_runtime_file("demo/softrear_sqlite.sql", false)[1] or "")
+
+    -- Always reseed: demo db is not user data; fresh state picks up schema updates
+    if seed ~= "" then
+      if vim.fn.filereadable(db_path) == 1 then vim.fn.delete(db_path) end
+      vim.fn.mkdir(vim.fn.fnamemodify(db_path, ":h"), "p")
+      local bin = db_path:match("%.duckdb$") and "duckdb" or "sqlite3"
+      vim.fn.system(bin .. " " .. vim.fn.shellescape(db_path)
+        .. " < " .. vim.fn.shellescape(seed))
+    end
+
+    -- Seed supplier intel database for federation demo
+    local supplier_sql_files = vim.api.nvim_get_runtime_file("demo/softrear_supplier.sql", false)
+    if #supplier_sql_files > 0 then
+      local grip_dir = vim.fn.getcwd() .. "/.grip"
+      vim.fn.mkdir(grip_dir, "p")
+      local supplier_db = grip_dir .. "/supplier_intel.db"
+      if vim.fn.filereadable(supplier_db) == 1 then vim.fn.delete(supplier_db) end
+      vim.fn.system("sqlite3 " .. vim.fn.shellescape(supplier_db)
+        .. " < " .. vim.fn.shellescape(supplier_sql_files[1]))
+    end
+
+    local connections = require("dadbod-grip.connections")
+    connections.switch(demo_url, "Softrear Inc. Analyst Portal\xe2\x84\xa2")
+    vim.schedule(function()
+      vim.notify(
+        "Softrear Inc. Analyst Portal\xe2\x84\xa2  .  walkthrough: demo/softrear-internal.md",
+        vim.log.levels.INFO
+      )
+    end)
   end, { desc = "Open the Softrear Inc. Analyst Portal" })
 
   -- :GripHome: return to the welcome screen from anywhere
