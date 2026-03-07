@@ -107,6 +107,7 @@ local function read_json_connections(path, source)
       local c = { name = entry.name, url = entry.url,
                   type = entry.type, source = source or "file" }
       if entry.attachments then c.attachments = entry.attachments end
+      if entry.last_used then c.last_used = entry.last_used end
       table.insert(result, c)
     end
   end
@@ -135,6 +136,7 @@ local function write_file_connections(conns)
     local entry = { name = c.name, url = c.url }
     if c.type then entry.type = c.type end
     if c.attachments and #c.attachments > 0 then entry.attachments = c.attachments end
+    if c.last_used then entry.last_used = c.last_used end
     table.insert(data, entry)
   end
   local json = vim.fn.json_encode(data)

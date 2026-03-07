@@ -7,6 +7,7 @@ local view   = require("dadbod-grip.view")
 local editor = require("dadbod-grip.editor")
 local sql    = require("dadbod-grip.sql")
 local query  = require("dadbod-grip.query")
+local ui     = require("dadbod-grip.ui")
 
 local M = {}
 M._version = require("dadbod-grip.version")
@@ -812,10 +813,16 @@ function M.open(arg, url, opts)
 
   local query_sql = query.build_sql(spec)
 
-  -- Run query with timing
-  local t_start = vim.uv.hrtime()
-  local result, qerr = db.query(query_sql, conn)
-  local elapsed_ms = math.floor((vim.uv.hrtime() - t_start) / 1e6)
+  -- Run query with loading indicator + timing
+  local short_label = file_path and vim.fn.fnamemodify(file_path, ":t")
+      or table_name_arg and (table_name_arg:match("[^.]+$") or table_name_arg)
+      or "result"
+  local result, qerr
+  local elapsed_ms = ui.blocking("  querying " .. short_label .. "...", function()
+    local t_start = vim.uv.hrtime()
+    result, qerr = db.query(query_sql, conn)
+    return math.floor((vim.uv.hrtime() - t_start) / 1e6)
+  end)
   if not result then
     vim.notify("Grip: " .. (qerr or "query failed"), vim.log.levels.ERROR)
     return
