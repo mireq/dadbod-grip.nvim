@@ -25,19 +25,19 @@ Connect to PostgreSQL, MySQL, SQLite, DuckDB, or MotherDuck and edit tables like
 </td>
 </tr></table>
 
-**Connect to PostgreSQL, MySQL, SQLite, or DuckDB and edit tables like Vim buffers.** With DuckDB as a hub, attach any combination of these databases with `:GripAttach` and JOIN data across all of them in a single query. Open Parquet, CSV, and remote URLs as live tables. Connect to MotherDuck for cloud analytics. Rows are color-coded as you stage changes: teal for modified, red for deleted, green for inserted. A live SQL float generates the exact DML as you work. Preview the full mutation before it touches the DB, then apply in a single transaction. Reverse committed transactions. Navigate foreign keys through a breadcrumb trail. Browse schema in a sidebar with PK/FK markers and instant table open. Issue DDL through the UI: create tables, rename columns, drop with CASCADE. Profile column distributions with sparklines. Explain query plans in plain English. Generate SQL from natural language via Anthropic, OpenAI, Gemini, or Ollama. Edit files in-place with `--write` and auto-refresh on a timer with `--watch`. Every Vim motion works. Nothing installs outside Neovim.
+**Connect to PostgreSQL, MySQL, SQLite, or DuckDB and edit tables like Vim buffers.** A command palette (`<C-p>`) surfaces every action without memorizing keymaps. The query pad has SQL syntax highlighting and a formatter (`gF`) that calls sql-formatter, pg_format, or sqlfluff and falls back to Lua. Drop any CSV, Parquet, or JSON file into the connection picker and open it as an editable grid in one keypress. With DuckDB as a hub, attach any combination of databases with `:GripAttach` and JOIN across all of them in a single query. Rows are color-coded as you stage changes: teal for modified, red for deleted, green for inserted. Preview the full mutation before it touches the DB, then apply in a single transaction. Reverse committed transactions. Navigate foreign keys through a breadcrumb trail. Generate SQL from natural language via Anthropic, OpenAI, Gemini, or Ollama. Every Vim motion works. Nothing installs outside Neovim.
 
 | **Editing** | **Analysis** | **Schema & AI** |
 |---|---|---|
-| **Inline cell editing** popup editor | **Data profiling** sparkline distributions | **FK navigation** breadcrumb trail |
-| **Batch edit** visual-mode multi-row ops | **Query Doctor** plain-English EXPLAIN | **DDL** create · rename · drop via UI |
-| **Mutation preview** full SQL before apply | **Visual staging** violet · green · red rows | **File as table** Parquet · CSV · remote URLs |
-| **Transaction undo** reverse committed changes | **Live SQL preview** float updates as you stage | **AI SQL** Anthropic · OpenAI · Gemini · Ollama |
-| **Schema browser** `gb` sidebar, PK/FK markers | **Data diff** `gD` compare tables by primary key | **Multi-DB** PostgreSQL · SQLite · MySQL · DuckDB · MotherDuck |
-| **Cross-DB federation** `:GripAttach` Postgres · MySQL · SQLite · MotherDuck in one DuckDB session | **Column filter builder** `gF` with operators and wildcards | **Schema grouping** sidebar sections per attached database |
-| **Saved queries** project-local `.grip/queries/` | **Export** CSV · TSV · JSON · SQL · Markdown · Table | **Connection profiles** global auto-persist |
-| **Surface nav** `1`-`3` sidebar · query pad · grid (press again for secondary) | **ER diagram** `4` tree-spine layout with FK follow and back navigation | **Depth views** `5`-`9` Stats · Columns · FK · Indexes · Constraints |
-| **Write mode** `:Grip file --write` · edit files and write back to disk | **Watch mode** `:Grip file --watch` · auto-refresh grid on a timer | **Picker `W` / `!`** open any connection in watch or write mode |
+| **Command palette** `<C-p>` searchable action list | **Data profiling** sparkline distributions | **FK navigation** breadcrumb trail |
+| **SQL formatter** `gF` sql-formatter · pg_format · Lua fallback | **Query Doctor** plain-English EXPLAIN | **DDL** create · rename · drop via UI |
+| **SQL syntax highlighting** query pad with treesitter | **Visual staging** violet · green · red rows | **File as table** Parquet · CSV · JSON · remote URLs |
+| **Local Files picker** open CSV/JSON/Parquet from cwd without typing a path | **Live SQL preview** float updates as you stage | **AI SQL** Anthropic · OpenAI · Gemini · Ollama |
+| **Inline cell editing** popup with Vim normal mode (`<Esc>`) | **Data diff** `gD` compare tables by primary key | **Multi-DB** PostgreSQL · SQLite · MySQL · DuckDB · MotherDuck |
+| **Mutation preview** full SQL before apply | **Column filter builder** `gF` with operators and wildcards | **Schema grouping** sidebar sections per attached database |
+| **Cross-DB federation** `:GripAttach` Postgres · MySQL · SQLite · MotherDuck | **Export** CSV · TSV · JSON · SQL · Markdown · Table | **Connection health** `T` tests all connection types |
+| **Surface nav** `1`-`3` sidebar · query pad · grid | **ER diagram** `4` tree-spine layout with FK follow | **Remappable keymaps** override or disable any key via `setup()` |
+| **Write mode** `--write` · edit files and write back to disk | **Watch mode** `--watch` · auto-refresh grid on a timer | **Depth views** `5`-`9` Stats · Columns · FK · Indexes · Constraints |
 
 <p align="center">
 <img src="assets/live.png" alt="dadbod-grip: schema sidebar, query pad, and editable grid with color-coded mutations" width="900">
