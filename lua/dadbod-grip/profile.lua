@@ -3,6 +3,7 @@
 
 local db  = require("dadbod-grip.db")
 local sql = require("dadbod-grip.sql")
+local ui  = require("dadbod-grip.ui")
 
 local M = {}
 
@@ -372,9 +373,9 @@ end
 function M.open(table_name, url)
   ensure_profile_highlights()
 
-  vim.notify("Profiling " .. table_name .. "...", vim.log.levels.INFO)
-
-  local data, err = M.gather(table_name, url)
+  local data, err = ui.blocking("Profiling " .. table_name .. "...", function()
+    return M.gather(table_name, url)
+  end)
   if not data then
     vim.notify("GripProfile: " .. (err or "failed"), vim.log.levels.ERROR)
     return

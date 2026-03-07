@@ -2,6 +2,19 @@
 
 **Check this file before adding any new keymap.** A duplicate silently clobbers existing behavior.
 
+All keys shown are defaults. Every binding is overridable via `setup()`:
+
+```lua
+require("dadbod-grip").setup({
+  keymaps = {
+    palette    = "<F1>",   -- remap to a different key
+    query_pad  = false,    -- disable entirely (pass false)
+  }
+})
+```
+
+Action names map 1:1 to the entries in `lua/dadbod-grip/keymaps.lua`.
+
 ## Grid (modifiable=false, ft=grip)
 
 ### Navigation
@@ -51,6 +64,7 @@
 | `T` | Toggle column type annotations |
 | `K` | Row view (vertical transpose) |
 | `?` | Show help popup |
+| `<C-p>` | Command palette (searchable action list) |
 | `Q` | Welcome screen (home) |
 
 ### Sort / Filter / Pagination
@@ -150,11 +164,13 @@ Note: explain query plan is accessible via `gx` (removed from tab system).
 
 | Key | Action |
 |-----|--------|
+| `<C-p>` | Command palette (searchable action list) |
 | `<C-CR>` | Execute query |
 | (auto) | SQL completion fires as you type: tables, columns, aliases, federation |
 | `<C-Space>` | Manually trigger SQL completion |
 | `<C-x><C-o>` | SQL completion: Vim-standard omnifunc / nvim-cmp source |
 | `gA` | AI SQL generation |
+| `gF` | Format SQL (external tool cascade: sql-formatter -> pg_format -> sqlfluff -> Lua fallback) |
 | `?` | Show help |
 | `q` | Close query pad |
 | `1` | Open sidebar |
@@ -171,6 +187,7 @@ Note: explain query plan is accessible via `gx` (removed from tab system).
 
 | Key | Action |
 |-----|--------|
+| `<C-p>` | Command palette (searchable action list) |
 | `<CR>` / `go` | Open table under cursor (plain) |
 | `gT` / `gt` | Pick table (picker) |
 | `gb` | Close sidebar |
@@ -194,6 +211,20 @@ Available for future features. Check this list before assigning a new `g` keymap
 **Uppercase (free):** `gA` (query pad only), `gB`, `gJ`, `gK`, `gL`, `gM`, `gQ`, `gU`, `gZ`
 **Lowercase (free in grid):** `gd`, `gm`, `gr`, `gw`
 **Lowercase (free in sidebar):** `gm`, `gr`
+
+## Command Palette
+
+`<C-p>` is available on all three surfaces (grid, query pad, sidebar).
+It opens the command palette: a searchable list of every action available
+in the current context, with a preview pane showing the key binding and
+description for each entry.
+
+Use it to discover keymaps, trigger actions without memorising their keys,
+or quickly search for a feature by name.
+
+| Key | Available in | Action |
+|-----|-------------|--------|
+| `<C-p>` | Grid, Query pad, Sidebar | Open command palette |
 
 ## Key Design Principles
 

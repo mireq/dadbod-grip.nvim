@@ -2,8 +2,9 @@
 -- Multi-provider: Anthropic, OpenAI, Gemini, Ollama.
 -- Schema context auto-assembled from grip metadata.
 
-local db = require("dadbod-grip.db")
+local db      = require("dadbod-grip.db")
 local sql_mod = require("dadbod-grip.sql")
+local ui      = require("dadbod-grip.ui")
 
 local M = {}
 
@@ -448,9 +449,8 @@ function M.ask(url)
   local CANCEL = "\0"
   local ok, question = pcall(vim.fn.input, { prompt = "Ask about your data: ", cancelreturn = CANCEL })
   if not ok or question == CANCEL or question == "" then return end
-  vim.notify("Generating SQL...", vim.log.levels.INFO)
-  vim.cmd("redraw")  -- force screen update before potential blocking schema fetch
-  M.generate_sql(question, url, function(result_sql, err)
+  ui.blocking("Generating SQL...", function()
+    M.generate_sql(question, url, function(result_sql, err)
       if err then
         vim.notify("AI: " .. err, vim.log.levels.ERROR)
         return
@@ -462,6 +462,7 @@ function M.ask(url)
       query_pad.open(url)
       query_pad.append_sql(result_sql, existing_sql and { replace = true } or nil)
   end, existing_sql)
+  end)
 end
 
 return M

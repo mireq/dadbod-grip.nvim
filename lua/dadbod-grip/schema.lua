@@ -4,6 +4,7 @@
 
 local db      = require("dadbod-grip.db")
 local VERSION = require("dadbod-grip.version")
+local ui      = require("dadbod-grip.ui")
 
 local M = {}
 
@@ -412,7 +413,8 @@ local function render(state)
 
   -- Hint line at bottom
   table.insert(lines, "")
-  table.insert(lines, " 1:conn 2:pad 3:grid  CR go gb q gq gw gc / F ?")
+  table.insert(lines, " 1:conn 2:pad 3:grid")
+  table.insert(lines, " <CR> / F ?")
   table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripReadonly" })
 
   vim.bo[_sidebar_bufnr].modifiable = true
@@ -511,14 +513,18 @@ end
 --- Set up buffer-local keymaps.
 local function setup_keymaps(url)
   local buf = _sidebar_bufnr
-  local function map(key, fn)
-    vim.keymap.set("n", key, fn, { buffer = buf, silent = true })
+  local km = require("dadbod-grip.keymaps")
+  local function kmap(action, fn, opts)
+    local key = km.get(action)
+    if not key then return end
+    local o = vim.tbl_extend("force", { buffer = buf, silent = true }, opts or {})
+    vim.keymap.set("n", key, fn, o)
   end
 
   local state = get_state(url)
 
   -- Open table / expand column (reuses existing grid window)
-  map("<CR>", function()
+  kmap("sidebar_open", function()
     local node = node_at_cursor(state)
     if not node then return end
     if node.is_file then
@@ -545,7 +551,7 @@ local function setup_keymaps(url)
   end)
 
   -- Open table in new split (explicit second grid)
-  map("<S-CR>", function()
+  kmap("sidebar_open_spl", function()
     local node = node_at_cursor(state)
     if not node then return end
     if node.is_file then return end  -- file nodes have no separate split action
@@ -557,14 +563,14 @@ local function setup_keymaps(url)
   end)
 
   -- Expand
-  map("l", function()
+  kmap("sidebar_expand", function()
     local node = node_at_cursor(state)
     if not node or node.kind ~= "table" or node.expanded then return end
     local key = node.file_key or node.name
     state.expanded[key] = true
     render(state)
   end)
-  map("zo", function()
+  kmap("sidebar_expand_z", function()
     local node = node_at_cursor(state)
     if node and node.kind == "table" then
       state.expanded[node.name] = true
@@ -573,7 +579,7 @@ local function setup_keymaps(url)
   end)
 
   -- Collapse
-  map("h", function()
+  kmap("sidebar_collapse", function()
     local node = node_at_cursor(state)
     if not node then return end
     if node.kind == "table" and node.expanded then
@@ -586,7 +592,7 @@ local function setup_keymaps(url)
       render(state)
     end
   end)
-  map("zc", function()
+  kmap("sidebar_collap_z", function()
     local node = node_at_cursor(state)
     if not node or node.kind ~= "table" then return end
     local key = node.file_key or node.name
@@ -595,7 +601,7 @@ local function setup_keymaps(url)
   end)
 
   -- Expand all
-  map("L", function()
+  kmap("sidebar_expand_all", function()
     if not state.items then return end
     for _, item in ipairs(state.items) do
       state.expanded[item.name] = true
@@ -604,7 +610,7 @@ local function setup_keymaps(url)
   end)
 
   -- Collapse all
-  map("H", function()
+  kmap("sidebar_collap_all", function()
     for k in pairs(state.expanded) do
       state.expanded[k] = false
     end
@@ -612,7 +618,7 @@ local function setup_keymaps(url)
   end)
 
   -- Filter/search: vim.fn.input() avoids dressing/noice float interception
-  map("/", function()
+  kmap("sidebar_filter", function()
     local CANCEL = "\0"
     local ok, input = pcall(vim.fn.input, { prompt = "Filter: ", default = state.filter or "", cancelreturn = CANCEL })
     if not ok or input == CANCEL then return end
@@ -623,32 +629,34 @@ local function setup_keymaps(url)
     end
   end)
 
-  -- F: clear filter and jump to first table
-  map("F", function()
+  -- sidebar_filter_c: clear filter and jump to first table
+  kmap("sidebar_filter_c", function()
     state.filter = nil
     render(state)
     vim.schedule(function() jump_to_first_table(state) end)
   end)
 
-  -- n/N: navigate between table nodes (wraps)
-  map("n", function() jump_to_next_table(state, 1) end)
-  map("N", function() jump_to_next_table(state, -1) end)
+  -- next/prev table node (wraps)
+  kmap("sidebar_next", function() jump_to_next_table(state, 1) end)
+  kmap("sidebar_prev", function() jump_to_next_table(state, -1) end)
 
   -- Refresh (r and R)
   local function do_refresh()
-    state.items = nil
-    state.col_cache = {}
-    state.pk_cache = {}
-    state.fk_cache = {}
-    fetch_tables(state)
-    render(state)
+    ui.blocking("Grip: refreshing schema...", function()
+      state.items = nil
+      state.col_cache = {}
+      state.pk_cache = {}
+      state.fk_cache = {}
+      fetch_tables(state)
+      render(state)
+    end)
     vim.notify("Grip: schema refreshed", vim.log.levels.INFO)
   end
-  map("r", do_refresh)
-  map("R", do_refresh)
+  kmap("sidebar_refresh",  do_refresh)
+  kmap("sidebar_refresh2", do_refresh)
 
   -- Yank table/column name to clipboard
-  map("y", function()
+  kmap("sidebar_yank", function()
     local node = node_at_cursor(state)
     if not node then return end
     local name = (node.kind == "table" and node.name)
@@ -661,15 +669,15 @@ local function setup_keymaps(url)
     end
   end)
 
-  -- gT / gt: table picker
+  -- table_picker / table_picker_alt: table picker
   local function _pick_table()
     require("dadbod-grip.picker").pick_table(url, function(name) open_table(name, url) end)
   end
-  map("gT", _pick_table)
-  map("gt", _pick_table)
+  kmap("table_picker",     _pick_table)
+  kmap("table_picker_alt", _pick_table)
 
-  -- go: open table under cursor with smart ORDER BY (latest rows first)
-  map("go", function()
+  -- sidebar_open_s: open table under cursor with smart ORDER BY (latest rows first)
+  kmap("sidebar_open_s", function()
     local node = node_at_cursor(state)
     if not node then return end
 
@@ -722,50 +730,50 @@ local function setup_keymaps(url)
     grip.open(arg, url, { reuse_win = target_win })
   end)
 
-  -- gb: close sidebar (from inside; gb elsewhere opens/focuses it)
-  map("gb", function() M.close() end)
+  -- schema_browser: close sidebar (from inside; gb elsewhere opens/focuses it)
+  kmap("schema_browser", function() M.close() end)
 
-  -- Q: go to welcome screen (home)
-  map("Q", function() require("dadbod-grip").open_welcome() end)
+  -- welcome: go to welcome screen (home)
+  kmap("welcome", function() require("dadbod-grip").open_welcome() end)
 
-  -- Query pad
-  map("q", function()
+  -- query_pad: open query pad
+  kmap("query_pad", function()
     local query_pad = require("dadbod-grip.query_pad")
     query_pad.open(url)
   end)
 
-  -- Load saved query into query pad
-  map("gq", function()
+  -- load_saved: load saved query into query pad
+  kmap("load_saved", function()
     local saved = require("dadbod-grip.saved")
     saved.pick(function(sql_content)
       require("dadbod-grip.query_pad").open(url, { initial_sql = sql_content })
     end)
   end)
 
-  -- Query history → load into query pad
-  map("gh", function()
+  -- query_history: load query history into query pad
+  kmap("query_history", function()
     require("dadbod-grip.history").pick(function(sql_content)
       require("dadbod-grip.query_pad").open(url, { initial_sql = sql_content })
     end)
   end)
 
-  -- Jump to main content window: grid > welcome (silent no-op if neither exists)
-  vim.keymap.set("n", "gw", function()
+  -- goto_grid: jump to main content window
+  kmap("goto_grid", function()
     local win = require("dadbod-grip.view").find_content_win()
     if win then vim.api.nvim_set_current_win(win) end
-  end, { buffer = buf, silent = true, nowait = true })
+  end, { nowait = true })
 
-  -- Switch connection (gC, gc, and C-g)
+  -- Switch connection (connections, sidebar_conns, connections_alt)
   -- on_cancel is a no-op: cancelling the picker keeps the sidebar visible.
   local function _pick_conn()
     require("dadbod-grip.connections").pick({ on_cancel = function() end })
   end
-  map("gC", _pick_conn)
-  map("gc", _pick_conn)
-  map("<C-g>", _pick_conn)
+  kmap("connections",     _pick_conn)
+  kmap("sidebar_conns",   _pick_conn)
+  kmap("connections_alt", _pick_conn)
 
-  -- DDL: drop table
-  map("D", function()
+  -- sidebar_drop: drop table
+  kmap("sidebar_drop", function()
     local node = node_at_cursor(state)
     if not node or node.kind ~= "table" then
       vim.notify("Move cursor to a table", vim.log.levels.INFO)
@@ -780,8 +788,8 @@ local function setup_keymaps(url)
     end)
   end)
 
-  -- DDL: create table
-  map("+", function()
+  -- sidebar_create: create table
+  kmap("sidebar_create", function()
     local ddl = require("dadbod-grip.ddl")
     ddl.create_table(url, function()
       state.items = nil
@@ -791,16 +799,16 @@ local function setup_keymaps(url)
     end)
   end)
 
-  -- 1: connections picker (already in sidebar = secondary action)
-  map("1", _pick_conn)
+  -- tab_1: connections picker (already in sidebar = secondary action)
+  kmap("tab_1", _pick_conn)
 
-  -- 2: open query pad
-  map("2", function()
+  -- tab_2: open query pad
+  kmap("tab_2", function()
     require("dadbod-grip.query_pad").open(url)
   end)
 
-  -- 3: jump to existing grid; if none, open table under cursor; if no node, table picker
-  map("3", function()
+  -- tab_3: jump to existing grid; if none, open table under cursor; if no node, table picker
+  kmap("tab_3", function()
     local win = require("dadbod-grip.view").find_content_win()
     if win then
       vim.api.nvim_set_current_win(win)
@@ -816,30 +824,33 @@ local function setup_keymaps(url)
     end
   end)
 
-  -- Tab views: 4=ER diagram float, 5-9 open a table in a specific view facet
+  -- tab_4-9: ER diagram float or open table in a specific view facet
   local TAB_VIEWS = { [4]="er_diagram", [5]="stats", [6]="columns",
                       [7]="fk", [8]="indexes", [9]="constraints" }
   for n = 4, 9 do
     local view_name = TAB_VIEWS[n]
-    map(tostring(n), function()
-      if view_name == "er_diagram" then
-        require("dadbod-grip.er_diagram").toggle(url)
-        return
-      end
-      local node = node_at_cursor(state)
-      if not node then return end
-      local tbl = (node.kind == "table" and node.name)
-               or (node.kind == "column" and node.table_name)
-      if not tbl then return end
-      local grip = require("dadbod-grip")
-      local target_win = find_right_win()
-      if target_win then vim.api.nvim_set_current_win(target_win) end
-      grip.open(tbl, url, { reuse_win = target_win, view = view_name })
-    end)
+    local tab_key = km.get("tab_" .. n)
+    if tab_key then
+      vim.keymap.set("n", tab_key, function()
+        if view_name == "er_diagram" then
+          require("dadbod-grip.er_diagram").toggle(url)
+          return
+        end
+        local node = node_at_cursor(state)
+        if not node then return end
+        local tbl = (node.kind == "table" and node.name)
+                 or (node.kind == "column" and node.table_name)
+        if not tbl then return end
+        local grip = require("dadbod-grip")
+        local target_win = find_right_win()
+        if target_win then vim.api.nvim_set_current_win(target_win) end
+        grip.open(tbl, url, { reuse_win = target_win, view = view_name })
+      end, { buffer = buf, silent = true })
+    end
   end
 
-  -- ga: attach external DB (DuckDB federation)
-  map("ga", function()
+  -- sidebar_attach: attach external DB (DuckDB federation)
+  kmap("sidebar_attach", function()
     if not url or not url:find("^duckdb:") then
       vim.notify("Attach requires a DuckDB connection.", vim.log.levels.WARN)
       return
@@ -847,8 +858,8 @@ local function setup_keymaps(url)
     vim.cmd("GripAttach")
   end)
 
-  -- gd: detach external DB
-  map("gd", function()
+  -- sidebar_detach: detach external DB
+  kmap("sidebar_detach", function()
     if not url or not url:find("^duckdb:") then
       vim.notify("Detach requires a DuckDB connection.", vim.log.levels.WARN)
       return
@@ -856,18 +867,23 @@ local function setup_keymaps(url)
     vim.cmd("GripDetach")
   end)
 
-  -- gG: ER diagram float (scroll to table under cursor if on a table node)
-  map("gG", function()
+  -- er_diagram: ER diagram float (scroll to table under cursor if on a table node)
+  kmap("er_diagram", function()
     local node = node_at_cursor(state)
     local tbl  = node and node.kind == "table" and node.name
     require("dadbod-grip.er_diagram").toggle(url, tbl)
   end)
 
-  -- Close
-  map("<Esc>", function() M.close() end)
+  -- sidebar_escape: close sidebar
+  kmap("sidebar_escape", function() M.close() end)
 
-  -- Help
-  map("?", function()
+  -- palette: command palette
+  kmap("palette", function()
+    require("dadbod-grip.palette").open("sidebar")
+  end)
+
+  -- help: schema help popup
+  kmap("help", function()
     local lines = {
       "",
       "  Schema Browser",

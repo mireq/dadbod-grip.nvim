@@ -365,6 +365,7 @@ Note: explain query plan is at `gx` (Query Doctor).
 | `<C-s>` | Save query with `:GripSave` |
 | `gq` | Load saved query (picker with SQL preview) |
 | `gA` | AI SQL generation (natural language) |
+| `gF` | Format SQL (external tool cascade: sql-formatter, pg_format, sqlfluff, or Lua) |
 | `go` / `gT` / `gt` | Table picker |
 | `gh` | Query history (with SQL preview) |
 | `gw` | Jump to grid window |

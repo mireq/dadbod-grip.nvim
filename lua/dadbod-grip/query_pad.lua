@@ -197,23 +197,31 @@ local function setup_keymaps(bufnr, url)
   -- correct after gC / gq / any other path that switches the connection.
   local function cur_url() return vim.b[bufnr].db or vim.g.db or url end
 
-  -- C-CR: run full buffer (use get_content to strip hint/AI-separator comment lines)
-  vim.keymap.set("n", "<C-CR>", function()
+  local km = require("dadbod-grip.keymaps")
+  local function kmap(action, mode, fn, opts)
+    local key = km.get(action)
+    if not key then return end
+    local o = vim.tbl_extend("force", { buffer = bufnr, silent = true }, opts or {})
+    vim.keymap.set(mode, key, fn, o)
+  end
+
+  -- qpad_execute: run full buffer (use get_content to strip hint/AI-separator comment lines)
+  kmap("qpad_execute", "n", function()
     local sql = M.get_content()
     if sql then run_sql(cur_url(), sql) end
-  end, { buffer = bufnr, silent = true, desc = "Grip: run query" })
+  end, { desc = "Grip: run query" })
 
-  -- C-CR in insert mode too
-  vim.keymap.set("i", "<C-CR>", function()
+  -- qpad_execute in insert mode too
+  kmap("qpad_execute", "i", function()
     vim.cmd("stopinsert")
     local sql = M.get_content()
     if sql then run_sql(cur_url(), sql) end
-  end, { buffer = bufnr, silent = true, desc = "Grip: run query" })
+  end, { desc = "Grip: run query" })
 
   setup_completion_keymaps(bufnr)
 
-  -- Visual C-CR: run selection (line-wise: runs all selected lines)
-  vim.keymap.set("v", "<C-CR>", function()
+  -- Visual qpad_execute: run selection (line-wise: runs all selected lines)
+  kmap("qpad_execute", "v", function()
     -- feedkeys Esc to exit visual mode and set '< '> marks, then run
     local esc = vim.api.nvim_replace_termcodes("<Esc>", true, false, true)
     vim.api.nvim_feedkeys(esc, "nx", false)
@@ -222,42 +230,54 @@ local function setup_keymaps(bufnr, url)
     local lines = vim.api.nvim_buf_get_lines(bufnr, start_line - 1, end_line, false)
     if #lines == 0 then return end
     run_sql(cur_url(), table.concat(lines, "\n"))
-  end, { buffer = bufnr, silent = true, desc = "Grip: run selection" })
+  end, { desc = "Grip: run selection" })
 
-  -- C-s: save query
-  vim.keymap.set("n", "<C-s>", function()
+  -- qpad_save: save query
+  kmap("qpad_save", "n", function()
     local saved = require("dadbod-grip.saved")
     saved.save_prompt(bufnr)
-  end, { buffer = bufnr, silent = true, desc = "Grip: save query" })
+  end, { desc = "Grip: save query" })
 
-  -- q: go to welcome screen (home)
-  vim.keymap.set("n", "q", function()
+  -- qpad_close: go to welcome screen (home)
+  kmap("qpad_close", "n", function()
     require("dadbod-grip").open_welcome()
-  end, { buffer = bufnr, silent = true, nowait = true, desc = "Grip: welcome screen" })
+  end, { nowait = true, desc = "Grip: welcome screen" })
 
-  -- gA: AI SQL generation (keep g-prefix in query pad to preserve A=append-at-EOL)
-  vim.keymap.set("n", "gA", function()
+  -- qpad_ai: AI SQL generation (keep g-prefix to preserve A=append-at-EOL)
+  kmap("qpad_ai", "n", function()
     local ai = require("dadbod-grip.ai")
     ai.ask(cur_url())
-  end, { buffer = bufnr, silent = true, desc = "Grip: AI SQL generation" })
+  end, { desc = "Grip: AI SQL generation" })
 
-  -- gb: schema browser sidebar
-  vim.keymap.set("n", "gb", function()
+  -- qpad_format: format SQL in buffer (external tool cascade -> Lua fallback)
+  kmap("qpad_format", "n", function()
+    local fmt   = require("dadbod-grip.format")
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    local sql   = table.concat(lines, "\n")
+    if sql:match("^%s*$") then return end
+    local result = fmt.format(sql)
+    if result and result ~= "" then
+      vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, vim.split(result, "\n"))
+    end
+  end, { desc = "Grip: format SQL" })
+
+  -- schema_browser: schema browser sidebar
+  kmap("schema_browser", "n", function()
     require("dadbod-grip.schema").toggle(cur_url())
-  end, { buffer = bufnr, silent = true, desc = "Grip: schema browser" })
+  end, { desc = "Grip: schema browser" })
 
-  -- gG: ER diagram float
-  vim.keymap.set("n", "gG", function()
+  -- er_diagram: ER diagram float
+  kmap("er_diagram", "n", function()
     require("dadbod-grip.er_diagram").toggle(cur_url())
-  end, { buffer = bufnr, silent = true, desc = "Grip: ER diagram" })
+  end, { desc = "Grip: ER diagram" })
 
-  -- gw: jump to main content window: grid > welcome (silent no-op if neither exists)
-  vim.keymap.set("n", "gw", function()
+  -- goto_grid: jump to main content window
+  kmap("goto_grid", "n", function()
     local win = require("dadbod-grip.view").find_content_win()
     if win then vim.api.nvim_set_current_win(win) end
-  end, { buffer = bufnr, silent = true, nowait = true, desc = "Grip: jump to grid" })
+  end, { nowait = true, desc = "Grip: jump to grid" })
 
-  -- go / gT / gt: table picker
+  -- go / table_picker / table_picker_alt: table picker
   local function _pick_table()
     local picker = require("dadbod-grip.picker")
     local u = cur_url()
@@ -266,66 +286,71 @@ local function setup_keymaps(bufnr, url)
     end)
   end
   vim.keymap.set("n", "go", _pick_table, { buffer = bufnr, silent = true, desc = "Grip: pick table" })
-  vim.keymap.set("n", "gT", _pick_table, { buffer = bufnr, silent = true, desc = "Grip: pick table" })
-  vim.keymap.set("n", "gt", _pick_table, { buffer = bufnr, silent = true, desc = "Grip: pick table" })
+  kmap("table_picker",     "n", _pick_table, { desc = "Grip: pick table" })
+  kmap("table_picker_alt", "n", _pick_table, { desc = "Grip: pick table" })
 
-  -- gh: query history
-  vim.keymap.set("n", "gh", function()
+  -- query_history: query history browser
+  kmap("query_history", "n", function()
     local hist = require("dadbod-grip.history")
     hist.pick(function(sql_content)
       vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, vim.split(sql_content, "\n"))
       vim.bo[bufnr].modified = false
     end)
-  end, { buffer = bufnr, silent = true, desc = "Grip: query history" })
+  end, { desc = "Grip: query history" })
 
-  -- gq: load saved query into buffer (cur_url() re-reads after any connection auto-switch)
-  vim.keymap.set("n", "gq", function()
+  -- load_saved: load saved query into buffer
+  kmap("load_saved", "n", function()
     local saved = require("dadbod-grip.saved")
     saved.pick(function(sql_content)
       vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, vim.split(sql_content, "\n"))
       vim.bo[bufnr].modified = false
     end)
-  end, { buffer = bufnr, silent = true, desc = "Grip: load saved query" })
+  end, { desc = "Grip: load saved query" })
 
-  -- Q: go to welcome screen (home)
-  vim.keymap.set("n", "Q", function()
+  -- welcome: go to welcome screen (home)
+  kmap("welcome", "n", function()
     require("dadbod-grip").open_welcome()
-  end, { buffer = bufnr, silent = true, desc = "Grip: welcome screen" })
+  end, { desc = "Grip: welcome screen" })
 
-  -- ?: help popup (same full grid help: useful for keymap reference while writing SQL)
-  vim.keymap.set("n", "?", function()
+  -- help: help popup
+  kmap("help", "n", function()
     require("dadbod-grip.view").show_help()
-  end, { buffer = bufnr, silent = true, desc = "Grip: help" })
+  end, { desc = "Grip: help" })
 
-  -- gC / <C-g>: switch database connection
+  -- palette: command palette
+  kmap("palette", "n", function()
+    require("dadbod-grip.palette").open("query")
+  end, { desc = "Grip: command palette" })
+
+  -- connections / connections_alt: switch database connection
   local function _pick_conn()
     require("dadbod-grip.connections").pick()
   end
-  vim.keymap.set("n", "gC", _pick_conn, { buffer = bufnr, silent = true, desc = "Grip: switch connection" })
-  vim.keymap.set("n", "<C-g>", _pick_conn, { buffer = bufnr, silent = true, desc = "Grip: switch connection" })
+  kmap("connections",     "n", _pick_conn, { desc = "Grip: switch connection" })
+  kmap("connections_alt", "n", _pick_conn, { desc = "Grip: switch connection" })
 
   -- ── tab view keymaps (1-9) ───────────────────────────────────────────────
   -- 1-3: surface navigation  4=ER diagram float  5-9: table-depth views
   local VIEW_MAP = { [4]="er_diagram", [5]="stats", [6]="columns",
                      [7]="fk", [8]="indexes", [9]="constraints" }
 
-  -- 1: schema sidebar (primary, not in sidebar right now)
-  vim.keymap.set("n", "1", function()
+  -- tab_1: schema sidebar
+  kmap("tab_1", "n", function()
     require("dadbod-grip.view").close_all_floats(nil)
     require("dadbod-grip.schema").toggle(cur_url())
-  end, { buffer = bufnr, silent = true, desc = "Grip: schema sidebar" })
+  end, { desc = "Grip: schema sidebar" })
 
-  -- 2: query history (secondary, already in query pad)
-  vim.keymap.set("n", "2", function()
+  -- tab_2: query history (secondary, already in query pad)
+  kmap("tab_2", "n", function()
     require("dadbod-grip.view").close_all_floats(nil)
     require("dadbod-grip.history").pick(function(sql_content)
       vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, vim.split(sql_content, "\n"))
       vim.bo[bufnr].modified = false
     end)
-  end, { buffer = bufnr, silent = true, desc = "Grip: query history" })
+  end, { desc = "Grip: query history" })
 
-  -- 3: jump to grid (primary), or table picker if no grid is open
-  vim.keymap.set("n", "3", function()
+  -- tab_3: jump to grid, or table picker if no grid is open
+  kmap("tab_3", "n", function()
     local view_mod = require("dadbod-grip.view")
     view_mod.close_all_floats(nil)
     local win = view_mod.find_content_win()
@@ -337,30 +362,33 @@ local function setup_keymaps(bufnr, url)
         require("dadbod-grip").open(name, u)
       end)
     end
-  end, { buffer = bufnr, silent = true, desc = "Grip: jump to grid" })
+  end, { desc = "Grip: jump to grid" })
 
-  -- 4: ER diagram float; 5-9: jump to grid + switch to that view
+  -- tab_4-9: ER diagram float or jump to grid + switch to that view
   for n = 4, 9 do
     local view_name = VIEW_MAP[n]
-    vim.keymap.set("n", tostring(n), function()
-      local view_mod = require("dadbod-grip.view")
-      view_mod.close_all_floats(nil)
-      if view_name == "er_diagram" then
-        require("dadbod-grip.er_diagram").toggle(cur_url())
-        return
-      end
-      local win = view_mod.find_content_win()
-      if win then
-        local gbuf = vim.api.nvim_win_get_buf(win)
-        vim.api.nvim_set_current_win(win)
-        view_mod.switch_view(gbuf, view_name)
-      else
-        local u = cur_url()
-        require("dadbod-grip.picker").pick_table(u, function(name)
-          require("dadbod-grip").open(name, u)
-        end)
-      end
-    end, { buffer = bufnr, silent = true, desc = "Grip: view " .. view_name })
+    local tab_key = km.get("tab_" .. n)
+    if tab_key then
+      vim.keymap.set("n", tab_key, function()
+        local view_mod = require("dadbod-grip.view")
+        view_mod.close_all_floats(nil)
+        if view_name == "er_diagram" then
+          require("dadbod-grip.er_diagram").toggle(cur_url())
+          return
+        end
+        local win = view_mod.find_content_win()
+        if win then
+          local gbuf = vim.api.nvim_win_get_buf(win)
+          vim.api.nvim_set_current_win(win)
+          view_mod.switch_view(gbuf, view_name)
+        else
+          local u = cur_url()
+          require("dadbod-grip.picker").pick_table(u, function(name)
+            require("dadbod-grip").open(name, u)
+          end)
+        end
+      end, { buffer = bufnr, silent = true, desc = "Grip: view " .. view_name })
+    end
   end
 end
 

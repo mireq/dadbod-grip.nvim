@@ -116,6 +116,121 @@ AI SQL generation (optional): >lua
 Provider auto-detection priority: ANTHROPIC_API_KEY > OPENAI_API_KEY >
 GEMINI_API_KEY > ollama (local). Explicit provider setting always wins.
 
+------------------------------------------------------------------------------
+                                                             *grip-keymaps-cfg*
+KEYMAP CONFIGURATION ~
+
+Every default key binding is overridable via setup(). Pass false to disable
+a binding entirely: >lua
+  require("dadbod-grip").setup({
+    keymaps = {
+      palette          = "<F1>",   -- remap command palette
+      query_pad        = false,    -- disable q -> query pad in grid
+      grid_filter_build= "<C-b>",  -- remap filter builder
+    }
+  })
+<
+Action names (stable API) with their defaults:
+
+  Shared across all surfaces ~
+  palette          = "<C-p>"   command palette
+  help             = "?"       help popup
+  er_diagram       = "gG"      ER diagram float
+  connections      = "gC"      switch connection
+  connections_alt  = "<C-g>"   alternate connections key
+  table_picker     = "gT"      table picker
+  table_picker_alt = "gt"      table picker (alternate)
+  query_history    = "gh"      query history browser
+  load_saved       = "gq"      load saved query
+  welcome          = "Q"       welcome / home screen
+
+  Shared: grid + sidebar ~
+  query_pad        = "q"       open query pad
+  ai               = "A"       AI SQL generation
+  schema_browser   = "gb"      schema sidebar (open/focus/close)
+
+  Shared: grid + query pad ~
+  goto_grid        = "gw"      jump to grid window
+
+  Tab views (1-9 slots, surface behaviour varies) ~
+  tab_1 .. tab_9   = "1".."9"
+
+  Grid: navigation ~
+  grid_row_down    = "j"       grid_row_up      = "k"
+  grid_col_left    = "h"       grid_col_right   = "l"
+  grid_col_next    = "w"       grid_col_prev    = "b"
+  grid_col_tab     = "<Tab>"   grid_col_tab_back= "<S-Tab>"
+  grid_col_end     = "e"       grid_row_first   = "gg"
+  grid_row_last    = "G"       grid_col_first   = "0"
+  grid_col_first2  = "^"       grid_col_last    = "$"
+  grid_prev_mod    = "{"       grid_next_mod    = "}"
+
+  Grid: editing ~
+  grid_edit        = "i"       grid_edit_enter  = "<CR>"
+  grid_null        = "x"       grid_paste       = "p"
+  grid_paste_rows  = "P"       grid_insert      = "o"
+  grid_clone       = "c"       grid_delete      = "d"
+  grid_apply       = "a"       grid_undo        = "u"
+  grid_redo        = "<C-r>"   grid_undo_all    = "U"
+
+  Grid: visual mode ~
+  grid_v_edit      = "e"       grid_v_delete    = "d"
+  grid_v_null      = "x"       grid_v_yank      = "y"
+
+  Grid: display ~
+  grid_hide_col    = "-"       grid_restore_cols= "g-"
+  grid_col_vis     = "gH"      grid_col_width   = "="
+  grid_type_row    = "T"       grid_row_view    = "K"
+  grid_live_sql    = "gl"      grid_refresh     = "r"
+
+  Grid: sort / filter / pagination ~
+  grid_sort        = "s"       grid_sort_stack  = "S"
+  grid_filter_cell = "f"       grid_filter_null = "gn"
+  grid_filter_build= "gF"      grid_filter_where= "<C-f>"
+  grid_filter_clear= "F"       grid_preset_load = "gp"
+  grid_preset_save = "gP"      grid_reset_view  = "X"
+  grid_next_page   = "L"       grid_prev_page   = "H"
+  grid_next_page2  = "]p"      grid_prev_page2  = "[p"
+  grid_last_page   = "]P"      grid_first_page  = "[P"
+
+  Grid: inspection / analysis ~
+  grid_explain_cell= "ge"      grid_preview_sql = "gs"
+  grid_copy_sql    = "gc"      grid_table_info  = "gi"
+  grid_table_props = "gI"      grid_rename_col  = "gN"
+  grid_aggregate   = "ga"      grid_col_stats   = "gS"
+  grid_profile     = "gR"      grid_show_ddl    = "gV"
+  grid_explain     = "gx"      grid_diff        = "gD"
+
+  Grid: export / yank ~
+  grid_export_clip = "gE"      grid_export_file = "gX"
+  grid_yank_cell   = "y"       grid_yank_row    = "Y"
+  grid_yank_table  = "gY"      grid_yank_md     = "gy"
+
+  Grid: FK navigation ~
+  grid_fk_follow   = "gf"      grid_fk_back     = "<C-o>"
+
+  Grid: workflow ~
+  grid_watch       = "gW"      grid_write_mode  = "g!"
+  grid_open_edit   = "gO"
+
+  Query pad ~
+  qpad_execute     = "<C-CR>"  qpad_save        = "<C-s>"
+  qpad_ai          = "gA"      qpad_format      = "gF"
+  qpad_close       = "q"
+
+  Schema sidebar ~
+  sidebar_open     = "<CR>"    sidebar_open_spl = "<S-CR>"
+  sidebar_expand   = "l"       sidebar_collapse = "h"
+  sidebar_expand_z = "zo"      sidebar_collap_z = "zc"
+  sidebar_expand_all  = "L"    sidebar_collap_all  = "H"
+  sidebar_filter   = "/"       sidebar_filter_c = "F"
+  sidebar_next     = "n"       sidebar_prev     = "N"
+  sidebar_refresh  = "r"       sidebar_refresh2 = "R"
+  sidebar_yank     = "y"       sidebar_open_s   = "go"
+  sidebar_drop     = "D"       sidebar_create   = "+"
+  sidebar_attach   = "ga"      sidebar_detach   = "gd"
+  sidebar_conns    = "gc"      sidebar_escape   = "<Esc>"
+
 No default keymaps are set outside the grip buffer.
 
 ==============================================================================
@@ -551,6 +666,7 @@ Query pad keymaps:
   <C-s>           Save query with :GripSave
   gq              Load saved query (picker with SQL preview)
   gA              AI SQL generation (natural language)
+  gF              Format SQL (external tool cascade -> Lua fallback)
   go / gT / gt    Table picker
   gh              Query history browser (with SQL preview)
   gw              Jump to grid window

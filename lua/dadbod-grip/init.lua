@@ -10,6 +10,7 @@ local query  = require("dadbod-grip.query")
 
 local M = {}
 M._version = require("dadbod-grip.version")
+M._keymaps = {}  -- populated by setup(); read by keymaps.get()
 
 -- Module-level augroup: prevents handler accumulation on config re-source.
 local _ag = vim.api.nvim_create_augroup("DadbodGripInit", { clear = true })
@@ -1443,6 +1444,7 @@ end
 ---@field max_col_width? integer Max display width per column (default: 40)
 ---@field timeout? integer       Query timeout in ms (default: 10000)
 ---@field ai? DadbodGripAIOpts   AI SQL generation config
+---@field keymaps? table         Key overrides: { action_name = "key" } or { action_name = false }
 
 ---Setup dadbod-grip with user options.
 ---@param opts? DadbodGripOpts
@@ -1453,10 +1455,16 @@ function M.setup(opts)
     max_col_width = { opts.max_col_width,  "number", true },
     timeout       = { opts.timeout,        "number", true },
     ai            = { opts.ai,             "table",  true },
+    keymaps       = { opts.keymaps,        "table",  true },
   })
   OPTS.limit        = opts.limit        or 100
   OPTS.max_col_width = opts.max_col_width or 40
   OPTS.timeout      = opts.timeout      or 10000
+
+  -- Keymap overrides: stored at module level for keymaps.get() to read.
+  if opts.keymaps then
+    M._keymaps = opts.keymaps
+  end
 
   -- AI configuration (optional)
   if opts.ai then

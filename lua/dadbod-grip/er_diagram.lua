@@ -6,6 +6,8 @@
 --- Navigation uses line_to_node[row]: pure row lookup, zero column math.
 --- Adding tables or columns never breaks layout; tree just grows vertically.
 
+local ui = require("dadbod-grip.ui")
+
 local M = {}
 
 local _ag = vim.api.nvim_create_augroup("DadbodGripER", { clear = true })
@@ -449,8 +451,9 @@ function M.show(url, scroll_to)
 
   if is_open() then close_er() end
 
-  vim.notify("Building ER diagram...", vim.log.levels.INFO)
-  local lines, _, line_to_node, table_lines = build_content(url)
+  local lines, _, line_to_node, table_lines = ui.blocking("Building ER diagram...", function()
+    return build_content(url)
+  end)
 
   -- Compute content width, then right-align +N to that edge
   local content_w = 0
