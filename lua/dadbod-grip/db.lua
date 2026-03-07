@@ -161,6 +161,15 @@ function M.execute(sql, url)
   return adapter.execute(sql, conn)
 end
 
+--- Ping a connection. Returns true on success, false on any error.
+--- File-backed adapters check filereadable(); network adapters run SELECT 1 (5s timeout).
+function M.ping(url)
+  local adapter, conn, err = resolve(url)
+  if not adapter then return false end
+  if adapter.ping then return adapter.ping(conn) end
+  return false
+end
+
 function M.get_foreign_keys(table_name, url)
   local adapter, conn, err = resolve(url)
   if not adapter then return {}, err end

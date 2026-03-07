@@ -1135,15 +1135,20 @@ M.get_state = get_state
 function M.refresh(url)
   if not url then return end
   local state = get_state(url)
-  -- Always invalidate cached tables so fresh data is fetched on next open
+  -- Invalidate all caches so fresh data is fetched
   state.items = nil
+  state.file_cols = nil
   state.col_cache = {}
   state.pk_cache = {}
   state.fk_cache = {}
   state.row_count_cache = {}
   -- Only re-render if sidebar is currently visible
   if not _sidebar_winid or not vim.api.nvim_win_is_valid(_sidebar_winid) then return end
-  fetch_tables(state)
+  if is_file_url(url) then
+    fetch_file_schema(state)
+  else
+    fetch_tables(state)
+  end
   if _sidebar_bufnr and vim.api.nvim_buf_is_valid(_sidebar_bufnr) then
     setup_keymaps(url)
   end

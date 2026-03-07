@@ -4,6 +4,17 @@
 
 local M = {}
 
+-- Session-scoped connection health state (never persisted).
+-- Values: "ok" | "fail" | "unknown" (default when absent)
+local _health = {}
+
+local function health_char(url)
+  local s = _health[url] or "unknown"
+  if s == "ok"   then return "*" end
+  if s == "fail" then return "x" end
+  return "o"
+end
+
 --- Find project root by walking up from cwd looking for .git or .grip.
 local function project_root()
   local dir = vim.fn.getcwd()
@@ -55,6 +66,91 @@ local function is_file_url(url)
     if lower:sub(-#ext) == ext then return true end
   end
   return false
+end
+
+--- Returns true when a connection maps to a local file that filereadable() can test.
+--- This includes DuckDB/SQLite file connections in addition to data-format files.
+local function is_testable_locally(c)
+  if not c then return false end
+  if c._local_file or c.type == "file" then return true end
+  if not c.url or c.url == "" then return false end
+  if c._new or c._temp or c._section_header then return false end
+  -- duckdb::memory: has no file to test
+  if c.url == "duckdb::memory:" then return false end
+  -- SQLite connections are always file-backed
+  if c.url:match("^sqlite:") then return true end
+  -- DuckDB file connections: duckdb:/path (double-colon = memory, already excluded)
+  if c.url:match("^duckdb:[^:]") then return true end
+  -- Data-format files (.csv, .parquet, etc.) accessed as local paths
+  if is_file_url(c.url) and not c.url:match("^https?://") and not c.url:match("^s3://") then
+    return true
+  end
+  return false
+end
+
+--- Strip scheme prefix from a connection URL to get the raw local filesystem path.
+local function extract_local_path(url)
+  if not url then return url end
+  return (url:gsub("^sqlite://", ""):gsub("^sqlite:", "")
+             :gsub("^duckdb://", ""):gsub("^duckdb:", ""))
+end
+
+--- Format a byte count for compact display (B / KB / MB / GB).
+local function fmt_size(bytes)
+  if not bytes or bytes < 0 then return "" end
+  if bytes < 1024             then return tostring(bytes) .. " B"  end
+  if bytes < 1048576          then return string.format("%.1f KB", bytes / 1024) end
+  if bytes < 1073741824       then return string.format("%.1f MB", bytes / 1048576) end
+  return string.format("%.1f GB", bytes / 1073741824)
+end
+
+-- Extensions that DuckDB can query directly (local paths only).
+local LOCAL_FILE_EXTS = {
+  ".parquet", ".csv", ".tsv", ".json", ".ndjson", ".jsonl",
+  ".xlsx", ".orc", ".arrow", ".ipc",
+}
+
+--- Scan cwd for supported data files and return them as picker-ready items.
+--- Scans root of cwd and one level of subdirectories (data/, demo/, etc.).
+--- Files are sorted alphabetically by display name.
+local function scan_local_files()
+  local cwd = vim.fn.getcwd()
+  local result = {}
+  local seen = {}
+  for _, ext in ipairs(LOCAL_FILE_EXTS) do
+    -- Root-level files: display as bare filename
+    local root_files = vim.fn.glob(cwd .. "/*" .. ext, false, true)
+    for _, path in ipairs(root_files) do
+      if not seen[path] then
+        seen[path] = true
+        table.insert(result, {
+          name        = vim.fn.fnamemodify(path, ":t"),
+          url         = path,
+          type        = "file",
+          _local_file = true,
+          size_bytes  = vim.fn.getfsize(path),
+        })
+      end
+    end
+    -- One level deep: display as "subdir/filename" so origin is clear
+    local sub_files = vim.fn.glob(cwd .. "/*/*" .. ext, false, true)
+    for _, path in ipairs(sub_files) do
+      if not seen[path] then
+        seen[path] = true
+        local subdir = vim.fn.fnamemodify(path, ":h:t")
+        local fname  = vim.fn.fnamemodify(path, ":t")
+        table.insert(result, {
+          name        = subdir .. "/" .. fname,
+          url         = path,
+          type        = "file",
+          _local_file = true,
+          size_bytes  = vim.fn.getfsize(path),
+        })
+      end
+    end
+  end
+  table.sort(result, function(a, b) return a.name < b.name end)
+  return result
 end
 
 --- Mask the password in a DB URL for display. Returns URL unchanged if no password found.
@@ -304,6 +400,17 @@ function M.list()
   return all
 end
 
+--- Mark a connection URL as healthy or failed for the current session.
+--- Called by M.switch() on success/failure and by the T retest action in the picker.
+function M.set_health(url, status)
+  _health[url] = status
+end
+
+--- Return the current session health for a URL: "ok" | "fail" | "unknown".
+function M.get_health(url)
+  return _health[url] or "unknown"
+end
+
 --- Strip session-only flags from a URL before persisting.
 --- --write / --watch / --watch=Ns must never reach connections.json.
 local function strip_flags(url)
@@ -397,10 +504,11 @@ function M.switch(url, name, conn_type, opts)
 
   if resolved_type == "file" then
     vim.notify("Grip: opening " .. (name or url), vim.log.levels.INFO)
-    -- Capture current window so the grid replaces it (e.g. dashboard)
-    local cur_win = vim.api.nvim_get_current_win()
+    M.set_health(url, "ok")
     vim.schedule(function()
-      local open_opts = { reuse_win = cur_win }
+      -- No reuse_win: let find_content_win() place the grid correctly.
+      -- Passing cur_win risks putting the grid in the sidebar if that window was focused.
+      local open_opts = {}
       if opts and opts.write    then open_opts.write    = true       end
       if opts and opts.watch_ms then open_opts.watch_ms = opts.watch_ms end
       require("dadbod-grip").open(url, nil, open_opts)
@@ -436,6 +544,7 @@ function M.switch(url, name, conn_type, opts)
   end
 
   vim.notify("Grip: connected to " .. (name or url), vim.log.levels.INFO)
+  M.set_health(url, "ok")
   -- Invalidate completion cache so the new connection's schema is fetched fresh.
   require("dadbod-grip.completion").invalidate(url)
 
@@ -571,20 +680,44 @@ function M.pick(opts)
     return false
   end)
 
+  -- Scan cwd for local data files (CSV, Parquet, JSON, etc.)
+  local local_files = scan_local_files()
+
   local max_name = 0
   for _, c in ipairs(conns) do
     max_name = math.max(max_name, vim.fn.strdisplaywidth(c.name))
+  end
+  for _, f in ipairs(local_files) do
+    max_name = math.max(max_name, vim.fn.strdisplaywidth(f.name))
   end
 
   -- Sentinel items at bottom of list
   local new_sentinel  = { name = "+ New connection...",          url = "", _new  = true }
   local temp_sentinel = { name = "~ Connect once (no save)...", url = "", _temp = true }
-  local picker_items = {}
-  for _, c in ipairs(conns) do
-    table.insert(picker_items, c)
+
+  -- Build the full item list (connections, local files section, sentinels).
+  -- Called at open time and from on_delete to refresh after a deletion.
+  local function build_picker_items()
+    local fresh = M.list()
+    table.sort(fresh, function(a, b)
+      local af, bf = is_file_backed(a), is_file_backed(b)
+      if af ~= bf then return af end
+      if af and bf then return (a.last_used or 0) > (b.last_used or 0) end
+      return false
+    end)
+    local fresh_files = scan_local_files()
+    local out = {}
+    for _, c in ipairs(fresh) do table.insert(out, c) end
+    if #fresh_files > 0 then
+      table.insert(out, { name = "Local Files (cwd)", url = "", _section_header = true })
+      for _, f in ipairs(fresh_files) do table.insert(out, f) end
+    end
+    table.insert(out, new_sentinel)
+    table.insert(out, temp_sentinel)
+    return out
   end
-  table.insert(picker_items, new_sentinel)
-  table.insert(picker_items, temp_sentinel)
+
+  local picker_items = build_picker_items()
 
   -- Track which connection URLs have password reveal active
   local show_pass = {}
@@ -594,16 +727,29 @@ function M.pick(opts)
     items = picker_items,
     on_cancel = on_cancel,
     display = function(c)
-      if c._new or c._temp then return c.name end
+      if c._section_header then
+        return "  " .. c.name
+      end
+      if c._new or c._temp then
+        return "  " .. c.name
+      end
+      if c._local_file then
+        local pad = string.rep(" ", max_name - vim.fn.strdisplaywidth(c.name))
+        return "  " .. c.name .. pad .. "  " .. fmt_size(c.size_bytes)
+      end
+      local dot = health_char(c.url)
       local pad = string.rep(" ", max_name - vim.fn.strdisplaywidth(c.name))
       local url_display = show_pass[c.url] and c.url or short_url(c.url)
-      return c.name .. pad .. "  " .. url_display
+      return dot .. " " .. c.name .. pad .. "  " .. url_display
     end,
     on_select = function(c)
+      if c._section_header then return end
       if c._new then
         prompt_new_connection()
       elseif c._temp then
         prompt_temp_connection()
+      elseif c._local_file then
+        M.switch(c.url, nil, "file", { write = true })
       else
         -- Lazy-seed the portal DB on first selection
         if c._is_demo and c._demo_sql and c._demo_sql ~= "" then
@@ -622,7 +768,7 @@ function M.pick(opts)
       end
     end,
     on_delete = function(c, refresh_fn)
-      if c._new or c._temp then return end
+      if c._new or c._temp or c._section_header or c._local_file then return end
       local CANCEL = "\0"
       -- Starter built-in: write a hidden flag so it never appears again
       if c._builtin_id then
@@ -630,11 +776,7 @@ function M.pick(opts)
         if ok and (ans == "y" or ans == "yes") then
           vim.fn.mkdir(vim.fn.stdpath("data") .. "/grip", "p")
           vim.fn.writefile({}, vim.fn.stdpath("data") .. "/grip/" .. c._builtin_id .. ".hidden")
-          local new_items = {}
-          for _, nc in ipairs(M.list()) do table.insert(new_items, nc) end
-          table.insert(new_items, new_sentinel)
-          table.insert(new_items, temp_sentinel)
-          refresh_fn(new_items)
+          refresh_fn(build_picker_items())
         end
         return
       end
@@ -644,29 +786,14 @@ function M.pick(opts)
         if ok and (ans == "y" or ans == "yes") then
           vim.fn.mkdir(vim.fn.stdpath("data") .. "/grip", "p")
           vim.fn.writefile({}, vim.fn.stdpath("data") .. "/grip/softrear.hidden")
-          local new_conns = M.list()
-          local new_items = {}
-          for _, nc in ipairs(new_conns) do
-            table.insert(new_items, nc)
-          end
-          table.insert(new_items, new_sentinel)
-          table.insert(new_items, temp_sentinel)
-          refresh_fn(new_items)
+          refresh_fn(build_picker_items())
         end
         return
       end
       local ok, ans = pcall(vim.fn.input, { prompt = "Remove '" .. c.name .. "'? (y/N): ", cancelreturn = CANCEL })
       if ok and (ans == "y" or ans == "yes") then
         M.remove(c.name)
-        -- Rebuild list with updated sentinels at end
-        local new_conns = M.list()
-        local new_items = {}
-        for _, nc in ipairs(new_conns) do
-          table.insert(new_items, nc)
-        end
-        table.insert(new_items, new_sentinel)
-        table.insert(new_items, temp_sentinel)
-        refresh_fn(new_items)
+        refresh_fn(build_picker_items())
       end
     end,
     actions = {
@@ -675,11 +802,11 @@ function M.pick(opts)
         label          = "!:write",
         close_on_select = true,
         when           = function(c)
-          return not c._new and not c._temp
+          return not c._new and not c._temp and not c._section_header and not c._local_file
               and (c.type == "file" or (not c.type and is_file_url(c.url)))
         end,
         fn             = function(c)
-          if c._new or c._temp then return end
+          if c._new or c._temp or c._section_header or c._local_file then return end
           M.switch(c.url, c.name, c.type, { write = true })
         end,
       },
@@ -687,18 +814,22 @@ function M.pick(opts)
         key            = "W",
         label          = "W:watch",
         close_on_select = true,
-        when           = function(c) return not c._new and not c._temp end,
+        when           = function(c)
+          return not c._new and not c._temp and not c._section_header and not c._local_file
+        end,
         fn             = function(c)
-          if c._new or c._temp then return end
+          if c._new or c._temp or c._section_header or c._local_file then return end
           M.switch(c.url, c.name, c.type, { watch_ms = 5000 })
         end,
       },
       {
         key   = "M",
         label = "M:mask",
-        when  = function(c) return not c._new and not c._temp end,
+        when  = function(c)
+          return not c._new and not c._temp and not c._section_header and not c._local_file
+        end,
         fn    = function(c)
-          if c._new or c._temp then return end
+          if c._new or c._temp or c._section_header or c._local_file then return end
           if show_pass[c.url] then
             show_pass[c.url] = nil
           else
@@ -711,13 +842,13 @@ function M.pick(opts)
         label          = "a:attach",
         close_on_select = true,
         when           = function(c)
-          if c._new or c._temp then return false end
+          if c._new or c._temp or c._section_header or c._local_file then return false end
           -- Show on non-DuckDB connections when current connection is DuckDB
           local cur = vim.g.db
           return cur and cur:find("^duckdb:") and not c.url:find("^duckdb:")
         end,
         fn             = function(c)
-          if c._new or c._temp then return end
+          if c._new or c._temp or c._section_header or c._local_file then return end
           -- Guard: grip_picker fires fn regardless of `when` predicate label
           local url = vim.g.db
           if not url or not url:find("^duckdb:") then
@@ -746,6 +877,40 @@ function M.pick(opts)
           M.save_attachments(url, duckdb_adapter.get_attachments(url))
           schema_mod.refresh(url)
           vim.notify(string.format("Attached '%s' as %s", c.name, alias), vim.log.levels.INFO)
+        end,
+      },
+      {
+        -- T: retest connection health. File-backed connections use filereadable()
+        -- for instant feedback; network DBs run SELECT 1 via db.ping() with a 5s timeout.
+        key   = "T",
+        label = "T:test",
+        when  = function(c) return not (c._new or c._temp or c._section_header) end,
+        fn    = function(c)
+          if c._new or c._temp or c._section_header then return end
+          if is_testable_locally(c) then
+            local path = extract_local_path(c.url)
+            M.set_health(c.url, vim.fn.filereadable(path) == 1 and "ok" or "fail")
+          else
+            local ok = require("dadbod-grip.db").ping(c.url)
+            M.set_health(c.url, ok and "ok" or "fail")
+          end
+        end,
+      },
+      {
+        -- s: save a local file as a named connection in .grip/connections.json.
+        key            = "s",
+        label          = "s:save",
+        close_on_select = true,
+        when           = function(c) return c._local_file == true end,
+        fn             = function(c)
+          if not c._local_file then return end
+          local CANCEL = "\0"
+          local default_name = vim.fn.fnamemodify(c.url, ":t:r")
+          local ok, name = pcall(vim.fn.input, {
+            prompt = "Save as: ", default = default_name, cancelreturn = CANCEL,
+          })
+          if not ok or name == CANCEL or name == "" then return end
+          M.switch(c.url, name, "file")
         end,
       },
     },

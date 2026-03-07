@@ -57,7 +57,7 @@ Not committed to any release. Roughly ordered by expected impact.
 - [ ] Bookmarked rows (mark interesting rows with `m`, recall with `'`, persist per table in `.grip/bookmarks.json`)
 - [ ] Multi-row selection for bulk ops (visual `V`-mode selects rows, then `d`=bulk DELETE, `gy`=copy all as table)
 - [ ] Quick data generation (`:GripFill` to populate empty table with N rows of realistic fake data per column type)
-- [ ] Connection health indicator: persistent dot in status bar (green/yellow/red) showing DB reachability; pings on cursor idle or timer
+- [x] Connection health indicators: `*`/`o`/`x` dots in connection picker; `T` retests file connections; status set on successful switch
 - [ ] Saved views: persist full grid state (active filters, sort, hidden columns, page size) as a named snapshot per table in `.grip/views.json`; recall without writing SQL
 - [ ] ASCII histogram for numeric columns: extend `gS` to show a quick distribution histogram inline; complement to stats popup
 - [ ] Row pinning: mark up to 5 rows to keep visible at the top of every page regardless of filter/sort; useful as reference anchors while editing

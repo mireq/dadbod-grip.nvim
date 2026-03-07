@@ -477,6 +477,15 @@ function M.execute(sql_str, url)
   return { affected = tonumber(n) or 0, message = n .. " row(s) affected" }, nil
 end
 
+--- Ping the server by running SELECT 1. Returns true on success, false on any error.
+function M.ping(url)
+  if vim.fn.executable("mysql") == 0 then return false end
+  local parsed = parse_url(url)
+  if not parsed then return false end
+  local _, _, code = mysql_query(parsed, "SELECT 1", 5000)
+  return code == 0
+end
+
 -- Exposed for testing
 M._parse_url = parse_url
 

@@ -352,4 +352,12 @@ function M.execute(sql_str, url)
   return { affected = tonumber(n) or 0, message = stdout:gsub("%s+$", "") }, nil
 end
 
+--- Ping the server by running SELECT 1. Returns true on success, false on any error.
+function M.ping(url)
+  if vim.fn.executable("psql") == 0 then return false end
+  local _, _, code = adapters.run_cmd(
+    { "psql", url, "--no-password", "--csv", "-c", "SELECT 1" }, 5000)
+  return code == 0
+end
+
 return M

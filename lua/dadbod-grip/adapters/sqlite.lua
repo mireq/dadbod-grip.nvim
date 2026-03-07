@@ -328,6 +328,13 @@ function M.execute(sql_str, url)
   return { affected = n, message = n .. " row(s) affected" }, nil
 end
 
+--- Ping: a SQLite DB is reachable when its file is readable.
+function M.ping(url)
+  local path = extract_path(url)
+  if not path then return false end
+  return vim.fn.filereadable(path) == 1
+end
+
 -- Exposed for testing
 M._extract_path = extract_path
 

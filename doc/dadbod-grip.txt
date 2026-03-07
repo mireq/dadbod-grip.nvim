@@ -713,6 +713,27 @@ or add a new one interactively.
 
 Connections are deduplicated by URL across all sources.
 
+Local file discovery ~
+
+When the connection picker opens it scans the current working directory for
+supported data files and shows them in a "Local Files (cwd)" section:
+
+  .csv  .tsv  .json  .ndjson  .jsonl  .parquet  .xlsx  .orc  .arrow  .ipc
+
+Selecting a file opens it connect-once (no save). Press `s` in the picker to
+save the file as a named connection in .grip/connections.json.
+
+Connection health ~
+
+Each saved connection shows a session-scoped status indicator:
+
+  *   connected this session (set automatically on successful switch)
+  o   unknown (not connected this session yet)
+  x   failed (last attempt did not succeed)
+
+Press `T` on any file-based connection in the picker to retest it instantly.
+The indicator updates in place. Health state is session-only and never persisted.
+
 ==============================================================================
 14. EXPORT                                                   *grip-export*
 

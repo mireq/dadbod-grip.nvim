@@ -909,6 +909,15 @@ function M.get_schema_batch_async(url, callback)
 end
 
 -- Exposed for testing
+--- Ping: memory instance is always reachable; file DBs require the file to be readable.
+function M.ping(url)
+  if vim.fn.executable("duckdb") == 0 then return false end
+  if url == "duckdb::memory:" then return true end
+  local path = extract_path(url)
+  if not path then return false end
+  return vim.fn.filereadable(path) == 1
+end
+
 M._extract_path = extract_path
 M._build_attach_prefix = build_attach_prefix
 M._detect_extension = detect_extension

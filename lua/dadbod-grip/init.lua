@@ -831,9 +831,11 @@ function M.open(arg, url, opts)
     return
   end
 
-  -- File-as-table: force DuckDB adapter (works even with no db set)
+  -- File-as-table: use the active DuckDB connection so ATTACHed databases
+  -- remain accessible. Fall back to duckdb::memory: when no DuckDB session exists.
   if file_path then
-    conn = "duckdb::memory:"
+    local active = vim.g.db
+    conn = (active and active:match("^duckdb:")) and active or "duckdb::memory:"
   end
 
   if not conn or conn == "" then
