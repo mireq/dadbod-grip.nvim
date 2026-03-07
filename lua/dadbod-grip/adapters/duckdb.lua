@@ -242,14 +242,14 @@ function M.get_primary_keys(table_name, url)
 
   if catalog then
     -- Attached catalog: duckdb_constraints() spans all catalogs.
+    -- No schema_name filter: schema is dropped by list_tables (same reason as get_column_info).
     sql_str = string.format([[
       SELECT UNNEST(constraint_column_names) AS column_name
       FROM duckdb_constraints()
       WHERE database_name = '%s'
-        AND schema_name = '%s'
         AND table_name = '%s'
         AND constraint_type = 'PRIMARY KEY'
-    ]], catalog:gsub("'", "''"), schema:gsub("'", "''"), tbl:gsub("'", "''"))
+    ]], catalog:gsub("'", "''"), tbl:gsub("'", "''"))
   else
     -- Main DB: use duckdb_constraints() with a string-literal database_name filter
     -- (same reason as get_column_info — information_schema fails with attachments).
@@ -290,7 +290,11 @@ function M.get_column_info(table_name, url)
 
   if catalog then
     -- Attached catalog: use duckdb_columns() which works for all attachment types
-    -- (SQLite, PostgreSQL, etc.) — they may not expose information_schema.
+    -- (SQLite, PostgreSQL, etc.). Do NOT filter by schema_name: list_tables drops
+    -- the schema from attached catalog table names (returns "alias.table", not
+    -- "alias.schema.table"), so the schema is unknown here. Filtering by
+    -- database_name + table_name is correct because table names are unique within
+    -- each attached catalog for practical use.
     info_sql = string.format([[
       SELECT
         column_name,
@@ -300,10 +304,9 @@ function M.get_column_info(table_name, url)
         '' AS constraints
       FROM duckdb_columns()
       WHERE database_name = '%s'
-        AND schema_name = '%s'
         AND table_name = '%s'
-      ORDER BY column_index
-    ]], catalog:gsub("'", "''"), schema:gsub("'", "''"), tbl:gsub("'", "''"))
+      ORDER BY schema_name, column_index
+    ]], catalog:gsub("'", "''"), tbl:gsub("'", "''"))
   else
     -- Main DB: use duckdb_columns() with a string-literal database_name filter.
     -- information_schema.columns fails when attachments are present (DuckDB enumerates
