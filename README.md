@@ -25,11 +25,14 @@ Connect to PostgreSQL, MySQL, SQLite, DuckDB, or MotherDuck and edit tables like
 </td>
 </tr></table>
 
-**Connect to PostgreSQL, MySQL, SQLite, or DuckDB and edit tables like Vim buffers.** A command palette (`<C-p>`) surfaces every action without memorizing keymaps. The query pad has SQL syntax highlighting and a formatter (`gF`) that calls sql-formatter, pg_format, or sqlfluff and falls back to Lua. Drop any CSV, Parquet, or JSON file into the connection picker and open it as an editable grid in one keypress. With DuckDB as a hub, attach any combination of databases with `:GripAttach` and JOIN across all of them in a single query. Rows are color-coded as you stage changes: teal for modified, red for deleted, green for inserted. Preview the full mutation before it touches the DB, then apply in a single transaction. Reverse committed transactions. Navigate foreign keys through a breadcrumb trail. Generate SQL from natural language via Anthropic, OpenAI, Gemini, or Ollama. Every Vim motion works. Nothing installs outside Neovim.
+**Connect to PostgreSQL, MySQL, SQLite, or DuckDB and edit tables like Vim buffers.** Rows stage with color coding, preview as SQL, and commit in a single transaction. Undo committed changes. Follow foreign keys through a breadcrumb trail. Open any Markdown file as a runnable SQL notebook and execute individual blocks with `<C-CR>`. Generate SQL from natural language.
+
+A command palette (`<C-p>`) surfaces every action without memorizing keymaps. The query pad has SQL syntax highlighting, a formatter, and built-in completion. Every Vim motion works. Nothing installs outside Neovim.
 
 | **Editing** | **Analysis** | **Schema & AI** |
 |---|---|---|
 | **Command palette** `<C-p>` searchable action list | **Data profiling** sparkline distributions | **FK navigation** breadcrumb trail |
+| **SQL Notebooks** `gn` pick .md and .sql files from project | **Block execution** `<C-CR>` runs fence under cursor · narrative untouched | **Demo notebook** `:GripStart` · seventeen tables · one investigation |
 | **SQL formatter** `gF` sql-formatter · pg_format · Lua fallback | **Query Doctor** plain-English EXPLAIN | **DDL** create · rename · drop via UI |
 | **SQL syntax highlighting** query pad with treesitter | **Visual staging** violet · green · red rows | **File as table** Parquet · CSV · JSON · remote URLs |
 | **Local Files picker** open CSV/JSON/Parquet from cwd without typing a path | **Live SQL preview** float updates as you stage | **AI SQL** Anthropic · OpenAI · Gemini · Ollama |
@@ -146,11 +149,19 @@ work without credentials.
 - **Query Doctor** via `:GripExplain` translating EXPLAIN plans into plain-English health checks with cost bars and index suggestions.
 - **AI SQL generation** via `A` or `:GripAsk` turning natural language into SQL queries using Anthropic, OpenAI, Gemini, or local Ollama. AI reads existing query pad SQL to modify it rather than generating from scratch. Schema context cached per connection.
 
+### SQL Notebooks
+
+- **Notebook picker** via `gn` from the grid, query pad, or schema sidebar. Scans `.md` and `.sql` files in your project and shows a preview of each.
+- **Block execution** via `<C-CR>` with cursor inside any `` ```sql ``` `` fence: that block's SQL executes, surrounding Markdown prose is untouched.
+- **Smart fallback**: cursor outside any fence runs the full buffer; visual selection always runs the selected text. Same key, context-aware behavior.
+- **No special format**: any Markdown file with SQL fences is a notebook. Write the question, then a SQL block, then what to look for in the result. Each block runs independently against the current connection.
+- **Demo notebook**: `:GripStart` loads `demo/softrear-internal.md` automatically — sixteen sections of a data quality investigation, runnable block by block.
+
 ### Schema and Workflow
 - **ER diagram** via `gG` or `4`: a tree-spine float showing every table with PK/FK/column summary, arranged by FK depth with box-drawing connectors. Press `<CR>` on any table to open its grid. Press `f` to follow a foreign key and `H` to go back (breadcrumb trail updates). `Tab`/`S-Tab` cycle between tables. Press `gG` or `q` to close. Column names truncate gracefully; overflow columns show a right-aligned `+N` count. Works from the grid, the query pad, and the schema sidebar.
 - **Schema browser** via `:GripSchema` or `gb` showing a sidebar tree with columns, types, and PK/FK markers. `gb` opens/focuses the browser from any buffer; pressing `gb` from inside closes it.
 - **Table picker** via `:GripTables` or `gT` / `gt` providing a fuzzy finder with column preview. Available from all three buffers: grid, query pad, and sidebar. In the sidebar, `go` opens the table under cursor with `ORDER BY created_at / PK DESC` so the latest rows appear first.
-- **SQL query pad** via `:GripQuery` or `q`. A persistent scratch buffer that pipes results into editable grids. Clicking a table in the sidebar or picker never replaces pad content: new queries append below existing SQL with a blank separator so all your work stays intact. `<C-CR>` runs the visual selection or the full buffer. `gA` reads existing pad content and modifies it rather than generating from scratch. Pressing `q` or `2` focuses the pad without overwriting anything.
+- **SQL query pad** via `:GripQuery` or `q`. A persistent scratch buffer that pipes results into editable grids. Clicking a table in the sidebar or picker never replaces pad content: new queries append below existing SQL with a blank separator so all your work stays intact. `<C-CR>` runs the visual selection or the full buffer; when cursor is inside a `` ```sql ``` `` fence, only that block runs. `gn` opens the notebook picker to load any `.md` or `.sql` file. `gA` reads existing pad content and modifies it rather than generating from scratch. Pressing `q` or `2` focuses the pad without overwriting anything.
 - **Built-in SQL completion** with table names, column names, SQL keywords, and alias tracking. No extra plugins required. In DuckDB federated sessions, columns from all attached databases appear with schema-qualified names (e.g. `pg.users.email`). Works with nvim-cmp (source `dadbod_grip`), blink.cmp, or standalone via `<C-Space>` and auto-trigger.
 - **Saved queries** via `:GripSave` and `:GripLoad` persisting to project-local `.grip/queries/` files.
 - **Connection profiles** via `:GripConnect` or `gC` storing connections in `.grip/connections.json` with `g:dbs` backward compatibility. Connections auto-persist globally (`~/.grip/connections.json`) so they're available from any project. Connecting opens the full workspace (schema sidebar + query pad) automatically. The picker shows a **Local Files (cwd)** section listing `.csv`, `.parquet`, `.json`, `.xlsx`, and other supported files in your working directory so you can open them without typing a path. Press `s` to save a local file as a named connection. Each connection displays a session-scoped health indicator (`*` ok, `o` unknown, `x` failed); press `T` on any file-based connection to retest it instantly.
@@ -363,8 +374,9 @@ Note: explain query plan is at `gx` (Query Doctor).
 
 | Key | Action |
 |-----|--------|
-| `<C-CR>` | Execute buffer (normal/insert) or selection (visual) into grip grid |
+| `<C-CR>` | Execute buffer (or SQL fence under cursor in notebooks) or selection (visual) into grip grid |
 | `<C-s>` | Save query with `:GripSave` |
+| `gn` | Notebook picker (load .md or .sql file from project) |
 | `gq` | Load saved query (picker with SQL preview) |
 | `gA` | AI SQL generation (natural language) |
 | `gF` | Format SQL (external tool cascade: sql-formatter, pg_format, sqlfluff, or Lua) |
