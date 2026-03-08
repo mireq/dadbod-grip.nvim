@@ -112,7 +112,7 @@ Open a table: `:Grip users`
 - [ ] `CR` expands cell value in popup
 
 ### Editing (on `users` table, has PK)
-- [ ] `e` on a cell opens float editor, type new value, `CR` saves
+- [ ] `i` on a cell opens float editor, type new value, `CR` saves
 - [ ] `Esc` in editor cancels without saving
 - [ ] Modified cell turns blue in grid
 - [ ] `n` sets cell to NULL (shows `*NULL*` dim)
@@ -125,7 +125,7 @@ Open a table: `:Grip users`
 
 ### Read-Only (on `no_pk_view`)
 - [ ] `:Grip no_pk_view` opens with `[read-only: no PK]` in title
-- [ ] `e`, `o`, `d`, `n`, `a` all show "Read-only" notification
+- [ ] `i`, `o`, `d`, `n`, `a` all show "Read-only" notification
 - [ ] Navigation still works normally
 
 ### Sort
@@ -543,7 +543,7 @@ Requires an API key: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, or
 ## 23. v2.5-v2.8 Features
 
 ### Mutation Preview (v2.5)
-- [ ] `e` on a cell, change value, `C-CR` -- row turns teal (staged), no DB write yet
+- [ ] `i` on a cell, change value, `C-CR` -- row turns teal (staged), no DB write yet
 - [ ] `gD` -- diff float opens showing `- old_value` / `+ new_value`
 - [ ] `u` inside diff float -- cancels, row goes back to original
 - [ ] `a` inside diff float -- applies to DB, row stays teal until refresh
@@ -587,7 +587,7 @@ Requires an API key: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, or
 - [ ] `gD` picker shows demo connections (`:GripStart` re-runnable)
 
 ### Cursor After Edit (v2.8)
-- [ ] `e` on a cell, change value, `<CR>` -- cursor advances to same column, next row
+- [ ] `i` on a cell, change value, `<CR>` -- cursor advances to same column, next row
 - [ ] When next row has a different-width preceding column (e.g. NULL vs text), cursor still lands in correct column, not in the separator
 - [ ] Last row: cursor stays on last row after editing (does not wrap)
 
@@ -609,7 +609,7 @@ just seed-sqlite && just dev-sqlite          # launch with SQLite
 ```
 
 1. `:Grip users` -- grid opens with 15 rows
-2. `e` on name cell, change value, `CR` -- cell turns blue
+2. `i` on name cell, change value, `CR` -- cell turns blue
 3. `o` -- new green row appears
 4. `d` on a row -- red strikethrough
 5. `gs` -- staged SQL preview shows UPDATE/INSERT/DELETE

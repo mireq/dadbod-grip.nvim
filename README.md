@@ -240,7 +240,7 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 
 | Key | Action |
 |-----|--------|
-| `i`/`e` | Edit cell under cursor |
+| `i` / `<CR>` | Edit cell under cursor |
 | `n` | Set cell to NULL |
 | `p` | Paste clipboard into cell |
 | `P` | Paste multi-line clipboard into consecutive rows |
