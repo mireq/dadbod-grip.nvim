@@ -87,6 +87,7 @@ M.defaults = {
   grid_v_delete    = "d",        -- toggle delete on selected rows
   grid_v_null      = "x",        -- set selected cells NULL
   grid_v_yank      = "y",        -- yank selected cells in column
+  grid_v_compare   = "gd",       -- diff exactly 2 selected rows side-by-side
 
   -- ── Grid: display ──────────────────────────────────────────────────────
   grid_hide_col    = "-",        -- hide column under cursor

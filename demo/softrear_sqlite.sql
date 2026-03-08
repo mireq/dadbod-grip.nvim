@@ -618,3 +618,41 @@ UPDATE internal_investigations SET case_metadata = '{"priority":"critical","watc
 UPDATE internal_investigations SET case_metadata = '{"priority":"resolved","watchers":0,"outcome":"acquired","acquisition_details":{"division":"R_D","clearance":"restricted","nda_signed":true},"tags":["formula","academic"]}' WHERE id = 3;
 UPDATE internal_investigations SET case_metadata = '{"priority":"high","watchers":2,"platform_metrics":{"subscribers":12000,"posts_last_90_days":0},"risk_assessment":{"exposure_risk":7,"dormancy":"suspicious"},"tags":["reddit","moderator"]}' WHERE id = 4;
 UPDATE internal_investigations SET case_metadata = '{"priority":"medium","watchers":1,"platform_metrics":{"subscribers":47300,"video_views_total":2100000},"notable_content":["ply_count_video","formula_comparison"],"tags":["youtube","viral"]}' WHERE id = 5;
+
+
+-- ─────────────────────────────────────────────────────────────
+-- PROFILE URLs (for testing gx URL opener in cell editor)
+-- All URLs are real and resolve in a browser.
+-- Row 5 (GalileoOfToiletPaper): the threat assessment team left a note.
+-- ─────────────────────────────────────────────────────────────
+
+ALTER TABLE suspicious_persons ADD COLUMN profile_url TEXT;
+UPDATE suspicious_persons SET profile_url = 'https://x.com/search?q=%22toilet+paper%22+changed+formula' WHERE id = 1;
+UPDATE suspicious_persons SET profile_url = 'https://www.youtube.com/results?search_query=bamboo+toilet+paper+truth' WHERE id = 2;
+UPDATE suspicious_persons SET profile_url = 'https://scholar.google.com/scholar?q=toilet+paper+fiber+density' WHERE id = 3;
+UPDATE suspicious_persons SET profile_url = 'https://www.reddit.com/r/mildlyinteresting/' WHERE id = 4;
+UPDATE suspicious_persons SET profile_url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' WHERE id = 5;
+UPDATE suspicious_persons SET profile_url = 'https://en.wikipedia.org/wiki/Toilet_paper#Composition' WHERE id = 6;
+UPDATE suspicious_persons SET profile_url = 'https://www.linkedin.com/search/results/all/?keywords=tissue+paper+supply+chain' WHERE id = 7;
+UPDATE suspicious_persons SET profile_url = 'https://discord.com/safety' WHERE id = 8;
+UPDATE suspicious_persons SET profile_url = 'https://www.greenpeace.org/usa/issues/forests/' WHERE id = 9;
+UPDATE suspicious_persons SET profile_url = 'https://www.reddit.com/search/?q=tissue+paper+formula+recipe' WHERE id = 10;
+
+
+-- ─────────────────────────────────────────────────────────────
+-- ISO 8601 DATETIMES (for testing timestamp extmark in cell editor)
+-- Selected rows in consumer_incidents and internal_investigations
+-- get full datetime strings so the extmark fires on open.
+-- ─────────────────────────────────────────────────────────────
+
+UPDATE consumer_incidents SET incident_date = '2023-08-14T14:32:07' WHERE id = 1;
+UPDATE consumer_incidents SET incident_date = '2023-11-03T09:17:44' WHERE id = 2;
+UPDATE consumer_incidents SET incident_date = '2024-01-19T15:47:22' WHERE id = 3;
+UPDATE consumer_incidents SET incident_date = '2024-02-08T11:03:55' WHERE id = 4;
+UPDATE consumer_incidents SET incident_date = '2023-07-04T08:22:11' WHERE id = 5;
+
+UPDATE internal_investigations SET opened_date = '2021-03-14T16:45:00' WHERE id = 1;
+UPDATE internal_investigations SET opened_date = '2022-07-01T10:08:33' WHERE id = 2;
+UPDATE internal_investigations SET opened_date = '2023-01-09T14:22:18' WHERE id = 3;
+UPDATE internal_investigations SET opened_date = '2022-11-15T09:55:01' WHERE id = 4;
+UPDATE internal_investigations SET opened_date = '2023-05-22T11:30:45' WHERE id = 5;

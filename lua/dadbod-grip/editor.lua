@@ -15,6 +15,53 @@ local M = {}
 
 local _ag = vim.api.nvim_create_augroup("DadbodGripEditor", { clear = true })
 
+-- try_timestamp_hint: add eol virtual text showing parsed relative time
+-- for any cell value that looks like an ISO date or datetime string.
+-- Silent no-op for non-timestamp values.
+local function try_timestamp_hint(buf, val)
+  if not val or val == "" then return end
+  local patterns = {
+    { "(%d%d%d%d)-(%d%d)-(%d%d)[T ](%d%d):(%d%d):(%d%d)", true  },
+    { "(%d%d%d%d)-(%d%d)-(%d%d)[T ](%d%d):(%d%d)",         true  },
+    { "(%d%d%d%d)-(%d%d)-(%d%d)",                           false },
+  }
+  local t
+  for _, entry in ipairs(patterns) do
+    local pat, has_time = entry[1], entry[2]
+    local y, mo, d, h, mi, s = val:match(pat)
+    if y then
+      t = os.time({
+        year  = tonumber(y),
+        month = tonumber(mo),
+        day   = tonumber(d),
+        hour  = has_time and tonumber(h)  or 0,
+        min   = has_time and tonumber(mi) or 0,
+        sec   = has_time and tonumber(s)  or 0,
+      })
+      break
+    end
+  end
+  if not t then return end
+
+  local now  = os.time()
+  local diff = now - t
+  local rel
+  if     diff < 0           then rel = "in the future"
+  elseif diff < 60          then rel = "just now"
+  elseif diff < 3600        then rel = math.floor(diff / 60)    .. "m ago"
+  elseif diff < 86400       then rel = math.floor(diff / 3600)  .. "h ago"
+  elseif diff < 86400 * 7   then rel = math.floor(diff / 86400) .. "d ago"
+  else                           rel = os.date("%b %d %Y", t)
+  end
+
+  local hint = "  \226\134\146 " .. rel .. "  (" .. os.date("%A, %b %d %Y", t) .. ")"
+  local ns = vim.api.nvim_create_namespace("grip_ts_hint")
+  vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
+    virt_text     = { { hint, "Comment" } },
+    virt_text_pos = "eol",
+  })
+end
+
 -- Sentinel: caller uses this to distinguish "user set NULL" from "user cancelled".
 M.NULL_VALUE = "__GRIP_NULL__"
 
@@ -74,6 +121,9 @@ function M.open(prompt, initial_value, on_save, opts)
   vim.wo[float_win].wrap        = true
   vim.wo[float_win].linebreak   = true
   vim.wo[float_win].breakindent = true
+
+  -- Timestamp hint: show relative age as eol virtual text for date/datetime values
+  try_timestamp_hint(edit_buf, initial_value)
 
   -- Start in insert mode at end of line
   vim.cmd("startinsert!")
@@ -139,6 +189,23 @@ function M.open(prompt, initial_value, on_save, opts)
   vim.keymap.set("n",           "<Esc>", do_cancel, { buffer = edit_buf, noremap = true })
   vim.keymap.set("n",           "q",     do_cancel, { buffer = edit_buf, noremap = true, nowait = true })
   vim.keymap.set("i",           "<C-c>", do_cancel, { buffer = edit_buf, noremap = true })
+
+  -- gx: open current cell value as URL (NORMAL mode only)
+  vim.keymap.set("n", "gx", function()
+    local lines = vim.api.nvim_buf_get_lines(edit_buf, 0, -1, false)
+    local val = table.concat(lines, "\n"):match("^%s*(.-)%s*$")
+    if val:match("^https?://") or val:match("^ftp://") then
+      if vim.ui.open then
+        vim.ui.open(val)
+      elseif vim.fn.has("mac") == 1 then
+        vim.fn.jobstart({ "open", val }, { detach = true })
+      else
+        vim.fn.jobstart({ "xdg-open", val }, { detach = true })
+      end
+    else
+      vim.notify("Not a URL", vim.log.levels.INFO)
+    end
+  end, { buffer = edit_buf, noremap = true, nowait = true, desc = "Open URL in browser" })
 
   -- Also cancel if the float loses focus
   vim.api.nvim_create_autocmd("WinLeave", {

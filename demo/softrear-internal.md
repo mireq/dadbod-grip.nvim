@@ -78,6 +78,11 @@ Airplane bathrooms are a structural failure mode for this product category.
 
 > **Grid:** `gS` shows severity statistics (mean, min, max, nulls). Press `f` on a
 > cell to instantly filter the grid to that incident type.
+>
+> **Cell editor:** open any row with `i`, navigate to `incident_date`, press `<Esc>`
+> to enter NORMAL mode. A line appears below the field value: "→ 2 years ago (Monday,
+> Aug 14 2023)". Seat 34B. Meal service had just ended. Two years ago. The file is
+> still open.
 
 ---
 
@@ -154,7 +159,8 @@ recalled, produced at a low-rated facility, sourced from a supplier currently
 under embargo.
 
 > **Grid:** this result is wide. Press `K` on any row for a vertical key-value view.
-> Press `gx` to inspect the query plan and confirm the join indexes are being used.
+> Visual-select two rows with `V`, then press `K` to stack both in one float.
+> Press `gE` to inspect the query plan and confirm the join indexes are used.
 > Press `gf` on any FK column to follow it interactively to its referenced table.
 
 ---
@@ -236,6 +242,26 @@ No further notes exist in the record.
 > **AI:** press `A` from the grid and describe a follow-up in plain English:
 > "show all youtube comments with knows_too_much true and an active investigation."
 > The AI has your current schema and will write the JOIN for you.
+
+---
+
+## 9.5 Confirming the threat sources are active
+
+The investigation returned `they_got_us`. Standard next step: verify each
+source is still online.
+
+Open the `suspicious_persons` table. Navigate to BambooKnows, row 2. Open
+the `profile_url` cell with `i`, press `<Esc>` to enter NORMAL mode, then
+press `gx`.
+
+The browser opens a YouTube search for bamboo toilet paper truth. The channel
+has uploaded recently. The status field `they_got_us` is confirmed accurate.
+
+Repeat for GalileoOfToiletPaper, row 5. The threat assessment team left a note
+in the `profile_url` field: the link resolves. It is a Rick Astley video. The
+47,000 subscribers are still watching.
+
+This is the investigator's problem now.
 
 ---
 
@@ -425,15 +451,8 @@ The data was here the whole time.
 
 ## Going further
 
-Every query result is a live grid. From any result:
+Every result set is a live grid. Press `?` from any surface for the full
+keymap reference. Navigate between SQL blocks with `gn` without leaving
+the notebook.
 
-- `s` / `S`   sort by any column; stack multiple sorts (▲1 ▼2 ▲3)
-- `f`         filter rows to match the cell under cursor
-- `gF`        filter builder: =, !=, LIKE, IN, BETWEEN, NULL, NOT NULL
-- `gR`        column distributions as sparklines across all rows
-- `gS`        column statistics: mean, min, max, nulls%, distinct count
-- `K`         row view: vertical key-value layout for wide results
-- `gx`        explain the current query plan
-- `gf`        follow a foreign key to its referenced table
-- `A`         AI SQL: describe what you want in English
-- `gE`        export to clipboard (CSV, TSV, JSON, SQL, Markdown)
+Full feature reference: https://joryeugene.github.io/dadbod-grip-web/

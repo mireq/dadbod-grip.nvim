@@ -2609,6 +2609,118 @@ function M._setup_keymaps(bufnr)
     end
   end, "Row view")
 
+  -- K (visual): stack-inspect multiple selected rows in one float.
+  -- Each row becomes a labeled block separated by a blank line.
+  -- 1 row selected → same float as normal K. N rows → stacked blocks.
+  vmap("K", function()
+    local row_indices = get_visual_rows()
+    if not row_indices or #row_indices == 0 then return end
+    local session = M._sessions[bufnr]
+    if not session then return end
+    local st = session.state
+
+    local max_name_w = 0
+    for _, col in ipairs(st.columns) do
+      max_name_w = math.max(max_name_w, vim.fn.strdisplaywidth(col))
+    end
+
+    local lines = {}
+    for bi, row_idx in ipairs(row_indices) do
+      -- Header: PK=value pairs, or fallback row number
+      local pk_vals = {}
+      for _, pk in ipairs(st.pks or {}) do
+        local v = data.effective_value(st, row_idx, pk)
+        table.insert(pk_vals, pk .. "=" .. (v or "NULL"))
+      end
+      local header = #pk_vals > 0 and table.concat(pk_vals, " ") or ("Row " .. bi)
+      table.insert(lines, " \226\148\128\226\148\128 " .. header .. " " .. string.rep("\226\148\128", 28))
+
+      for _, col in ipairs(st.columns) do
+        local val = data.effective_value(st, row_idx, col)
+        local pad = string.rep(" ", max_name_w - vim.fn.strdisplaywidth(col))
+        local prefix = " " .. col .. pad .. "   "
+        local json_ok, json_decoded = val and pcall(vim.fn.json_decode, val) or false, nil
+        if json_ok then json_decoded = vim.fn.json_decode(val) end
+        if json_ok and type(json_decoded) == "table" then
+          local jlines = json_to_lines(json_decoded)
+          if jlines and #jlines > 0 then
+            table.insert(lines, prefix .. jlines[1])
+            for ji = 2, #jlines do
+              table.insert(lines, string.rep(" ", #prefix) .. jlines[ji])
+            end
+          else
+            table.insert(lines, prefix .. (val or "NULL"))
+          end
+        else
+          local display_val = val and val:gsub("\n", "↵"):gsub("\r", "") or "NULL"
+          table.insert(lines, prefix .. display_val)
+        end
+      end
+
+      if bi < #row_indices then
+        table.insert(lines, "")
+      end
+    end
+
+    local title = #row_indices == 1
+      and " Row " .. row_indices[1] .. " "
+      or  " " .. #row_indices .. " rows "
+    local grip_win = vim.api.nvim_get_current_win()
+    local _, popup_buf = open_info_float(grip_win, lines, { title = title })
+    vim.keymap.set("n", "]p", "<Nop>", { buffer = popup_buf, silent = true })
+    vim.keymap.set("n", "[p", "<Nop>", { buffer = popup_buf, silent = true })
+  end, "Stack-inspect selected rows")
+
+  -- gd (visual): diff exactly 2 selected rows, highlighting what differs.
+  -- Pure display: no DB interaction. Differing cells get GripModified / DiffAdd.
+  kvmap("grid_v_compare", function()
+    local rows = get_visual_rows()
+    if not rows or #rows ~= 2 then
+      vim.notify("Select exactly 2 rows to compare", vim.log.levels.INFO)
+      return
+    end
+    local session = M._sessions[bufnr]
+    if not session then return end
+    local st = session.state
+
+    local max_name_w = 0
+    for _, col in ipairs(st.columns) do
+      max_name_w = math.max(max_name_w, vim.fn.strdisplaywidth(col))
+    end
+
+    local lines  = {}
+    local marks  = {}  -- { line_idx (0-based), hl_group }
+    for _, col in ipairs(st.columns) do
+      local a = data.effective_value(st, rows[1], col) or "NULL"
+      local b = data.effective_value(st, rows[2], col) or "NULL"
+      local pad = string.rep(" ", max_name_w - vim.fn.strdisplaywidth(col))
+      local line_a = " " .. col .. pad .. "  A  " .. a:gsub("\n", "↵")
+      local line_b = " " .. col .. pad .. "  B  " .. b:gsub("\n", "↵")
+      if a ~= b then
+        table.insert(marks, { idx = #lines,     hl = "GripModified" })
+        table.insert(marks, { idx = #lines + 1, hl = "DiffAdd" })
+      end
+      table.insert(lines, line_a)
+      table.insert(lines, line_b)
+      table.insert(lines, "")
+    end
+    -- Remove trailing blank line
+    if lines[#lines] == "" then table.remove(lines) end
+
+    local title = " Row " .. rows[1] .. " vs Row " .. rows[2] .. " "
+    local grip_win = vim.api.nvim_get_current_win()
+    local _, popup_buf = open_info_float(grip_win, lines, { title = title })
+    local ns = vim.api.nvim_create_namespace("grip_row_compare")
+    for _, m in ipairs(marks) do
+      vim.api.nvim_buf_set_extmark(popup_buf, ns, m.idx, 0, {
+        end_col = 0, end_row = m.idx + 1,
+        hl_group = m.hl, hl_eol = true,
+      })
+    end
+    vim.keymap.set("n", "]p", "<Nop>", { buffer = popup_buf, silent = true })
+    vim.keymap.set("n", "[p", "<Nop>", { buffer = popup_buf, silent = true })
+  end, "Compare two selected rows")
+
   -- Shared helper: navigate to column by visible index offset.
   -- Works on data rows, header row, and type annotation row.
   local function nav_col(bufnr_l, offset, use_finish)
