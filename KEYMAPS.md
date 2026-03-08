@@ -64,6 +64,8 @@ The editor starts in INSERT mode. Press `<Esc>` to drop into NORMAL for Vim moti
 | `d` | Toggle delete on selected rows |
 | `x` | Set selected cells to NULL |
 | `y` | Yank selected cells in column |
+| `gd` | Diff exactly 2 selected rows side-by-side (highlights differing cells) |
+| `K` | Stack selected rows in one float (vertical key-value inspect, N rows) |
 
 ### Display / Column
 | Key | Action |
@@ -222,7 +224,7 @@ Note: explain query plan is accessible via `gx` (removed from tab system).
 Available for future features. Check this list before assigning a new `g` keymap:
 
 **Uppercase (free):** `gA` (query pad only), `gB`, `gJ`, `gK`, `gL`, `gM`, `gQ`, `gU`, `gZ`
-**Lowercase (free in grid):** `gd`, `gm`, `gr`, `gw`
+**Lowercase (free in grid):** `gm`, `gr`, `gw`
 **Lowercase (free in sidebar):** `gm`, `gr`
 
 ## Command Palette
