@@ -1810,7 +1810,14 @@ function M._setup_keymaps(bufnr)
   kmap("grid_refresh", function()
     local session = M._sessions[bufnr]
     if not session then return end
-    -- Re-run query via init callback
+    if data.has_changes(session.state) then
+      local staged = data.count_staged(session.state)
+      local choice = vim.fn.confirm(
+        string.format("Refresh will discard %d unapplied change(s). Continue?", staged),
+        "&Yes\n&Cancel", 2
+      )
+      if choice ~= 1 then return end
+    end
     if session.on_refresh then session.on_refresh(bufnr) end
   end, "Refresh query")
 
