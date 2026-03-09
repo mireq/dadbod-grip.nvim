@@ -46,12 +46,13 @@ local function try_timestamp_hint(buf, val)
   local now  = os.time()
   local diff = now - t
   local rel
-  if     diff < 0           then rel = "in the future"
-  elseif diff < 60          then rel = "just now"
-  elseif diff < 3600        then rel = math.floor(diff / 60)    .. "m ago"
-  elseif diff < 86400       then rel = math.floor(diff / 3600)  .. "h ago"
-  elseif diff < 86400 * 7   then rel = math.floor(diff / 86400) .. "d ago"
-  else                           rel = os.date("%b %d %Y", t)
+  if     diff < 0              then rel = "in the future"
+  elseif diff < 60             then rel = "just now"
+  elseif diff < 3600           then rel = math.floor(diff / 60)           .. "m ago"
+  elseif diff < 86400          then rel = math.floor(diff / 3600)         .. "h ago"
+  elseif diff < 86400 * 30     then rel = math.floor(diff / 86400)        .. "d ago"
+  elseif diff < 86400 * 365    then rel = math.floor(diff / (86400 * 30)) .. "mo ago"
+  else                              rel = math.floor(diff / (86400 * 365)) .. "y ago"
   end
 
   local hint = "  \226\134\146 " .. rel .. "  (" .. os.date("%A, %b %d %Y", t) .. ")"
