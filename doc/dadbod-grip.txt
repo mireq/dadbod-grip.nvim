@@ -204,7 +204,8 @@ Action names (stable API) with their defaults:
   grid_table_props = "gI"      grid_rename_col  = "gN"
   grid_aggregate   = "ga"      grid_col_stats   = "gS"
   grid_profile     = "gR"      grid_show_ddl    = "gV"
-  grid_explain     = "gx"      grid_diff        = "gD"
+  grid_explain     = "gQ"      grid_diff        = "gD"
+  grid_url_open    = "gx"      -- open URL in current cell (http/https/ftp)
 
   Grid: export / yank ~
   grid_export_clip = "gE"      grid_export_file = "gX"
@@ -487,7 +488,8 @@ ANALYSIS AND EXPORT ~
                   Shows count, sum, avg, min, max
   gS              Column statistics popup
                   Shows count, distinct, nulls, min/max, top values
-  gx              Explain current query plan
+  gQ              Explain current query plan
+  gx              Open URL in current cell (http/https/ftp)
   gR              Table profile (sparkline distributions)
   gV              Show CREATE TABLE DDL in floating window
   gD              Diff current table against another table
@@ -519,7 +521,7 @@ Table-depth views (consistent from grid, sidebar, and query pad):
   8               Indexes
   9               Constraints
 
-  Note: explain query plan is at gx (removed from tab system).
+  Note: explain query plan is at gQ (removed from tab system).
 
 COLUMN VISIBILITY ~
                                                   *grip-column-visibility*
@@ -947,7 +949,7 @@ Profiling keymaps:
 21. QUERY DOCTOR                                        *grip-explain-full*
 
 The Query Doctor translates raw EXPLAIN plans into plain-English health
-checks. Run with `:GripExplain` or `gx` from a grid buffer.
+checks. Run with `:GripExplain` or `gQ` from a grid buffer.
 
 Output includes:
   - Severity labels: OK (green), WARN (yellow), SLOW (red)

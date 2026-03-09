@@ -127,7 +127,8 @@ M.defaults = {
   grid_col_stats   = "gS",       -- column statistics popup
   grid_profile     = "gR",       -- table profile (sparkline distributions)
   grid_show_ddl    = "gV",       -- show CREATE TABLE DDL float
-  grid_explain     = "gx",       -- EXPLAIN query plan
+  grid_explain     = "gQ",       -- EXPLAIN query plan
+  grid_url_open    = "gx",       -- open URL in current cell (http/https/ftp)
   grid_diff        = "gD",       -- diff against another table
 
   -- ── Grid: export / yank ────────────────────────────────────────────────

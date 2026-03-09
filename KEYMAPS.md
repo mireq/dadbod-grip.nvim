@@ -121,7 +121,8 @@ The editor starts in INSERT mode. Press `<Esc>` to drop into NORMAL for Vim moti
 | `gS` | Column statistics popup (distinct, nulls%, top values) |
 | `gR` | Table profile (sparkline distributions) |
 | `gV` | Show CREATE TABLE DDL float |
-| `gx` | Explain current query plan |
+| `gQ` | Explain current query plan |
+| `gx` | Open URL in current cell (http/https/ftp) |
 | `gD` | Diff against another table |
 | `gE` | Export to clipboard (CSV, TSV, JSON, SQL, Markdown, Grip Table) |
 | `gX` | **[NEW v2.9]** Export to file (csv/json/sql) |
@@ -151,7 +152,7 @@ Table-depth views (consistent across grid, sidebar, query pad):
 | `8` | Indexes |
 | `9` | Constraints |
 
-Note: explain query plan is accessible via `gx` (removed from tab system).
+Note: explain query plan is accessible via `gQ` (removed from tab system).
 
 ### Schema & Workflow
 | Key | Action |
@@ -224,7 +225,7 @@ Note: explain query plan is accessible via `gx` (removed from tab system).
 
 Available for future features. Check this list before assigning a new `g` keymap:
 
-**Uppercase (free):** `gB`, `gJ`, `gK`, `gL`, `gM`, `gQ`, `gU`, `gZ`
+**Uppercase (free):** `gB`, `gJ`, `gK`, `gL`, `gM`, `gU`, `gZ`
 **Lowercase (free in grid):** `gm`, `gr`, `gw`
 **Lowercase (free in sidebar):** `gm`, `gr`
 
@@ -254,7 +255,7 @@ Modal floats | close | close | (nothing) | (nothing) | (nothing) | (nothing) | c
 Notes:
 - `q` means "to query pad" from grid/sidebar; "welcome screen" from query pad; "close" in modal floats
 - Uppercase `gX` = global/navigation actions (connections, schema browser, ER diagram)
-- Lowercase `gx` = local inspection/analysis actions (FK follow, explain, export)
+- Lowercase `gx` = open URL in current cell (http/https/ftp); `gQ` = explain query plan
 - `?` = help everywhere, always
 - `gc` in grid = "copy staged SQL" (legacy DBUI compat); `gc` in sidebar = connections
 - `:GripOpen` = command only, no grid keymap (`gO` is taken: read-only to editable)

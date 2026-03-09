@@ -497,7 +497,7 @@ These are specific bugs found and fixed. Verify they stay fixed.
 - [ ] Shows proportional cost bars (block chars)
 - [ ] Shows actionable tips for slow operations
 - [ ] Shows summary with estimated cost and row count
-- [ ] `gx` from grid runs EXPLAIN on current query
+- [ ] `gQ` from grid runs EXPLAIN on current query
 - [ ] Works on PostgreSQL (cost-based with timing)
 - [ ] Works on SQLite (EXPLAIN QUERY PLAN)
 - [ ] Works on DuckDB (Estimated Cardinality)

@@ -332,7 +332,7 @@ Keys `4`–`9` are **depth views**: lenses applied to the current table, availab
 | `8` | Indexes | Name, type, unique flag, columns covered |
 | `9` | Constraints | CHECK, UNIQUE, NOT NULL constraints |
 
-Note: explain query plan is at `gx` (Query Doctor).
+Note: explain query plan is at `gQ` (Query Doctor).
 
 ### Analysis & Export
 
@@ -341,7 +341,8 @@ Note: explain query plan is at `gx` (Query Doctor).
 | `ga` | Aggregate selected cells (visual mode) |
 | `gS` | Column statistics popup |
 | `gR` | Table profile (sparkline distributions) |
-| `gx` | Query Doctor (plain-English EXPLAIN) |
+| `gQ` | Query Doctor (plain-English EXPLAIN) |
+| `gx` | Open URL in current cell (http/https/ftp) |
 | `gD` | Diff against another table |
 | `gv` | Toggle compact/wide diff layout |
 | `gE` | Export to clipboard (CSV, TSV, JSON, SQL INSERT, Markdown, Grip Table) |

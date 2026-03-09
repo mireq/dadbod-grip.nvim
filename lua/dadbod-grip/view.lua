@@ -1713,7 +1713,7 @@ function M.switch_view(bufnr, view_name)
     return
   end
 
-  -- Explain opens the Query Health popup (same as gx): text format is far more readable than a grid
+  -- Explain opens the Query Health popup (same as gQ): text format is far more readable than a grid
   if view_name == "explain" then
     local query_sql
     if session.query_spec then
@@ -4146,7 +4146,7 @@ function M._setup_keymaps(bufnr)
     end)
   end, "Export in multiple formats")
 
-  -- gx: explain current query (shortcut for :GripExplain)
+  -- gQ: explain current query (shortcut for :GripExplain)
   kmap("grid_explain", function()
     local session_x = M._sessions[bufnr]
     if not session_x then return end
@@ -4162,6 +4162,27 @@ function M._setup_keymaps(bufnr)
     end
     vim.cmd("GripExplain " .. explain_sql)
   end, "Explain current query")
+
+  -- gx: open URL in current cell (mirrors cell editor gx and Vim convention)
+  kmap("grid_url_open", function()
+    local cell = M.get_cell(bufnr)
+    if not cell or not cell.value then
+      vim.notify("No cell value", vim.log.levels.INFO)
+      return
+    end
+    local val = tostring(cell.value):match("^%s*(.-)%s*$")
+    if val:match("^https?://") or val:match("^ftp://") then
+      if vim.ui.open then
+        vim.ui.open(val)
+      elseif vim.fn.has("mac") == 1 then
+        vim.fn.jobstart({ "open", val }, { detach = true })
+      else
+        vim.fn.jobstart({ "xdg-open", val }, { detach = true })
+      end
+    else
+      vim.notify("Not a URL", vim.log.levels.INFO)
+    end
+  end, "Open URL in current cell")
 
   -- gD: diff against another table (picker with schema-overlap preview)
   kmap("grid_diff", function()
@@ -4498,7 +4519,15 @@ function M._setup_keymaps(bufnr)
   end, "AI SQL generation")
 
   kmap("grid_fill", function()
-    require("dadbod-grip").do_fill_rows(1)
+    local CANCEL = "\0"
+    local ok, input = pcall(vim.fn.input, { prompt = "Rows to generate: ", default = "1", cancelreturn = CANCEL })
+    if not ok or input == CANCEL or input == "" then return end
+    local n = tonumber(input)
+    if not n or n < 1 then
+      vim.notify("Enter a number >= 1", vim.log.levels.INFO)
+      return
+    end
+    require("dadbod-grip").do_fill_rows(math.min(50, n))
   end, "AI-generated staged rows (GripFill)")
 
   -- ── tab view keymaps (1-9) ───────────────────────────────────────────────
@@ -4704,7 +4733,8 @@ function M.show_help(opts)
       "  gS        Column statistics popup",
       "  gR        Table profile (sparkline distributions)",
       "  gV        Show CREATE TABLE DDL",
-      "  gx        Explain current query plan",
+      "  gQ        Explain current query plan",
+      "  gx        Open URL in current cell (http/https/ftp)",
       "  gD        Diff against another table",
       "  gE        Export to clipboard (CSV, TSV, JSON, SQL, Markdown)",
       "  gX        Export to file (csv/json/sql)  :GripExport",
@@ -4721,7 +4751,7 @@ function M.show_help(opts)
       "  7         Foreign Keys: outbound and inbound",
       "  8         Indexes: name, type, columns covered",
       "  9         Constraints: CHECK, UNIQUE, NOT NULL",
-      "  (explain query plan: gx)",
+      "  (explain query plan: gQ)",
       "",
       "  Schema & Workflow",
       "  go/gT/gt  Pick table (floating picker)",
