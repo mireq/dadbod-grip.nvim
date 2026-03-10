@@ -450,9 +450,11 @@ do
   local orig_list  = db.list_tables
   local orig_cols  = db.get_column_info
   local orig_query = db.query
+  local orig_batch = db.get_schema_batch
 
   db.list_tables     = function(url) return {}, nil end
   db.get_column_info = function(tn, url) return {}, nil end
+  db.get_schema_batch = function(url) return nil end
 
   -- Mock db.query to simulate responses:
   -- information_schema → fails (SQLite has no information_schema)
@@ -479,9 +481,10 @@ do
 
   -- Cleanup
   duckdb_adapter.detach(ATT_URL, "b")
-  db.list_tables     = orig_list
-  db.get_column_info = orig_cols
-  db.query           = orig_query
+  db.list_tables      = orig_list
+  db.get_column_info  = orig_cols
+  db.query            = orig_query
+  db.get_schema_batch = orig_batch
 end
 
 
@@ -496,9 +499,11 @@ do
   local orig_list  = db.list_tables
   local orig_cols  = db.get_column_info
   local orig_query = db.query
+  local orig_batch = db.get_schema_batch
 
-  db.list_tables     = function(url) return {}, nil end
-  db.get_column_info = function(tn, url) return {}, nil end
+  db.list_tables      = function(url) return {}, nil end
+  db.get_column_info  = function(tn, url) return {}, nil end
+  db.get_schema_batch = function(url) return nil end
 
   db.query = function(sql, url)
     if sql:find("information_schema") then
@@ -519,9 +524,10 @@ do
   ok(names["weight"], "fed_column SQLite fallback: 'weight' column via duckdb_columns()")
 
   duckdb_adapter.detach(ATT2_URL, "b")
-  db.list_tables     = orig_list
-  db.get_column_info = orig_cols
-  db.query           = orig_query
+  db.list_tables      = orig_list
+  db.get_column_info  = orig_cols
+  db.query            = orig_query
+  db.get_schema_batch = orig_batch
 end
 
 -- ── table context: bare-name match for federated schema keys ─────────────────
